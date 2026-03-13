@@ -1,0 +1,11 @@
+{
+  "stations": [
+    {
+      "id": "ST. 1110",
+      "name": "Ratnagar",
+      "latitude": 26.9835,
+      "longitude": 85.9103,
+      "district": "Mahottari"
+    }
+  ]
+}

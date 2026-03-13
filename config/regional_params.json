@@ -1,0 +1,12 @@
+{
+  "region": "Terai_Plains",
+  "snyder_coefficients": {
+    "Ct": 1.4,
+    "Cp": 0.655
+  },
+  "climate_change_factor": 1.10,
+  "manning_n": {
+    "channel": 0.03,
+    "overbank": 0.035
+  }
+}
