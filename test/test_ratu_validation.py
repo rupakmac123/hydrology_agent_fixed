@@ -4,8 +4,6 @@ Validation Test: Verify agent outputs match Ratu Bridge Report Table 5
 
 import sys
 import os
-
-# Add parent directory to Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.discharge import DischargeCalculator
