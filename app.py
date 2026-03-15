@@ -329,6 +329,7 @@ with tab4:
         st.warning("⚠️ Please run discharge analysis in Tab 3 first")
 
 # ============== TAB 5: Scour Calculation ==============
+# ============== TAB 5: Scour Calculation ==============
 with tab5:
     st.header("🌊 Scour Depth Analysis")
     
@@ -342,30 +343,28 @@ with tab5:
                 "Design Discharge Q (m³/s)",
                 value=st.session_state.results['Design_Discharge'],
                 step=0.01,
-                key="scour_Q_design",
-                help="Design discharge from Tab 3 (Q100 × 1.10)"
+                key="scour_Q_design"
             )
             L_bridge = st.number_input("Bridge Length (m)", value=226.17, step=0.01)
         
         with col2:
-            dmean_mm = st.number_input("dmean (mm)", value=2.8, step=0.1, help="Mean diameter of bed material")
-            Ksf = st.number_input("Ksf (Silt Factor)", value=2.9, step=0.1, help="Ksf = 1.76 × √(dmean)")
+            dmean_mm = st.number_input("dmean (mm)", value=2.8, step=0.1)
+            Ksf = st.number_input("Ksf (Silt Factor)", value=2.9, step=0.1)
         
         with col3:
-            Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1, help="Blench's Zero Bed Factor")
+            Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1)
             freeboard = st.number_input("Freeboard (m)", value=1.5, step=0.1)
         
-        # AUTO-CALCULATE discharge intensity from Q_design
+        # Auto-calculate q from Q_design
         st.markdown("---")
-        st.subheader("📊 Discharge Intensity (Auto-Calculated from Q_design)")
+        st.subheader("📊 Discharge Intensity (Auto-Calculated)")
         
         width_factor = st.slider(
             "Effective Width Factor",
             min_value=0.5,
             max_value=1.0,
             value=0.8,
-            step=0.05,
-            help="Fraction of bridge length used for flow distribution"
+            step=0.05
         )
         
         effective_width = L_bridge * width_factor
@@ -373,44 +372,39 @@ with tab5:
         
         st.info(f"""
         **📈 Auto-Calculated Values:**
-        - Effective Width: {effective_width:.2f} m ({width_factor*100:.0f}% of bridge length)
+        - Effective Width: {effective_width:.2f} m
         - Average Discharge Intensity (q_avg): **{q_auto:.3f} m²/s**
-        - Scour Discharge (Q_scour = Q_design × 1.3/1.1): **{Q_design * (1.3/1.1):.2f} m³/s**
         """)
         
-        use_auto_q = st.checkbox("✅ Use auto-calculated q values from Q_design", value=True)
+        use_auto_q = st.checkbox("✅ Use auto-calculated q values", value=True)
         
-        st.subheader("Cross-Section Analysis (Table 8 & 9)")
+        st.subheader("Cross-Section Analysis")
         
         # Upstream section
         st.markdown("**Upstream Section**")
         col1, col2 = st.columns(2)
         with col1:
             HFL_US = st.number_input("HFL US (m)", value=219.06, step=0.01)
-            if use_auto_q:
-                q_avg_US = st.number_input("q avg US (m²/s)", value=round(q_auto * 0.9, 2), step=0.01, key="q_avg_US")
-            else:
-                q_avg_US = st.number_input("q avg US (m²/s)", value=5.21, step=0.01, key="q_avg_US_manual")
+            q_avg_US = st.number_input("q avg US (m²/s)", 
+                                      value=round(q_auto * 0.9, 2) if use_auto_q else 5.21, 
+                                      step=0.01)
         with col2:
-            if use_auto_q:
-                q_max_US = st.number_input("q max US (m²/s)", value=round(q_auto * 1.3, 2), step=0.01, key="q_max_US")
-            else:
-                q_max_US = st.number_input("q max US (m²/s)", value=7.7, step=0.01, key="q_max_US_manual")
+            q_max_US = st.number_input("q max US (m²/s)", 
+                                      value=round(q_auto * 1.3, 2) if use_auto_q else 7.7, 
+                                      step=0.01)
         
         # Existing bridge section
         st.markdown("**Existing Bridge Section**")
         col1, col2 = st.columns(2)
         with col1:
             HFL_EX = st.number_input("HFL EX (m)", value=218.6, step=0.01)
-            if use_auto_q:
-                q_avg_EX = st.number_input("q avg EX (m²/s)", value=round(q_auto, 2), step=0.01, key="q_avg_EX")
-            else:
-                q_avg_EX = st.number_input("q avg EX (m²/s)", value=5.28, step=0.01, key="q_avg_EX_manual")
+            q_avg_EX = st.number_input("q avg EX (m²/s)", 
+                                      value=round(q_auto, 2) if use_auto_q else 5.28, 
+                                      step=0.01)
         with col2:
-            if use_auto_q:
-                q_max_EX = st.number_input("q max EX (m²/s)", value=round(q_auto * 1.4, 2), step=0.01, key="q_max_EX")
-            else:
-                q_max_EX = st.number_input("q max EX (m²/s)", value=8.1, step=0.01, key="q_max_EX_manual")
+            q_max_EX = st.number_input("q max EX (m²/s)", 
+                                      value=round(q_auto * 1.4, 2) if use_auto_q else 8.1, 
+                                      step=0.01)
         
         # Calculate scour
         if st.button("🔍 Calculate Scour Depths", type="primary"):
@@ -426,18 +420,22 @@ with tab5:
                 scour_US = scour_calc.full_scour_analysis(HFL_US, q_avg_US, q_max_US)
                 scour_EX = scour_calc.full_scour_analysis(HFL_EX, q_avg_EX, q_max_EX)
                 
-                # Table 8
+                # Display Table 8
                 st.subheader("Mean Scour Calculation (Table 8)")
                 scour_table = pd.DataFrame({
                     'Section': ['Upstream', 'Existing Bridge'],
-                    'D_lacey_avg': [scour_US['mean_scour']['D_lacey_avg'], scour_EX['mean_scour']['D_lacey_avg']],
-                    'D_lacey_max': [scour_US['mean_scour']['D_lacey_max'], scour_EX['mean_scour']['D_lacey_max']],
-                    'D_blench': [scour_US['mean_scour']['D_blench'], scour_EX['mean_scour']['D_blench']],
-                    'D_adopted': [scour_US['mean_scour']['D_adopted'], scour_EX['mean_scour']['D_adopted']]
+                    'D_lacey_avg': [scour_US['mean_scour']['D_lacey_avg'], 
+                                   scour_EX['mean_scour']['D_lacey_avg']],
+                    'D_lacey_max': [scour_US['mean_scour']['D_lacey_max'],
+                                   scour_EX['mean_scour']['D_lacey_max']],
+                    'D_blench': [scour_US['mean_scour']['D_blench'],
+                                scour_EX['mean_scour']['D_blench']],
+                    'D_adopted': [scour_US['mean_scour']['D_adopted'],
+                                 scour_EX['mean_scour']['D_adopted']]
                 })
                 st.dataframe(scour_table, width='stretch')
                 
-                # Table 9
+                # Display Table 9
                 st.subheader("Scour Depth and Level Calculation (Table 9)")
                 table9_data = {
                     'Parameter': [
@@ -468,10 +466,59 @@ with tab5:
                 table9_df = pd.DataFrame(table9_data)
                 st.dataframe(table9_df, width='stretch')
                 
-                st.success(f"✅ Scour calculation completed!")
+                # ✅ SAVE TO SESSION STATE FOR REPORT GENERATION
+                st.session_state.scour_results = {
+                    'parameters': {
+                        'Q_design': Q_design,
+                        'L_bridge': L_bridge,
+                        'dmean_mm': dmean_mm,
+                        'Ksf': Ksf,
+                        'Blench_Fb': Blench_Fb
+                    },
+                    'upstream': {
+                        'mean_scour': {
+                            'D_lacey_avg': scour_US['mean_scour']['D_lacey_avg'],
+                            'D_lacey_max': scour_US['mean_scour']['D_lacey_max'],
+                            'D_blench': scour_US['mean_scour']['D_blench'],
+                            'D_adopted': scour_US['mean_scour']['D_adopted']
+                        },
+                        'pier_abutment_scour': {
+                            'D_abutment': scour_US['pier_abutment_scour']['D_abutment'],
+                            'D_pier': scour_US['pier_abutment_scour']['D_pier']
+                        },
+                        'scour_levels': {
+                            'scour_level_abutment': scour_US['scour_levels']['scour_level_abutment'],
+                            'scour_level_pier': scour_US['scour_levels']['scour_level_pier']
+                        },
+                        'min_soffit_level': scour_US['min_soffit_level'],
+                        'HFL': HFL_US
+                    },
+                    'existing': {
+                        'mean_scour': {
+                            'D_lacey_avg': scour_EX['mean_scour']['D_lacey_avg'],
+                            'D_lacey_max': scour_EX['mean_scour']['D_lacey_max'],
+                            'D_blench': scour_EX['mean_scour']['D_blench'],
+                            'D_adopted': scour_EX['mean_scour']['D_adopted']
+                        },
+                        'pier_abutment_scour': {
+                            'D_abutment': scour_EX['pier_abutment_scour']['D_abutment'],
+                            'D_pier': scour_EX['pier_abutment_scour']['D_pier']
+                        },
+                        'scour_levels': {
+                            'scour_level_abutment': scour_EX['scour_levels']['scour_level_abutment'],
+                            'scour_level_pier': scour_EX['scour_levels']['scour_level_pier']
+                        },
+                        'min_soffit_level': scour_EX['min_soffit_level'],
+                        'HFL': HFL_EX
+                    }
+                }
+                
+                st.success("✅ Scour calculation completed and saved for report!")
                 
             except Exception as e:
                 st.error(f"❌ Scour calculation error: {e}")
+                import traceback
+                st.code(traceback.format_exc())
     else:
         st.warning("⚠️ Please run discharge analysis first (Tab 3)")
 
