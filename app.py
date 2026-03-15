@@ -483,6 +483,9 @@ with tab6:
         results = st.session_state.results
         catchment = st.session_state.catchment_props
         
+        st.subheader("Download Options")
+        
+        # Option 1: HEC-RAS JSON
         hec_ras_data = {
             'project_info': {
                 'bridge_name': catchment.get('bridge_name', 'Bridge'),
@@ -513,8 +516,81 @@ with tab6:
             mime="application/json"
         )
         
+        # Option 2: Complete Hydrology Report (DOCX)
+        st.markdown("---")
+        st.subheader("📄 Complete Hydrology Report")
+        
+        if st.button("📊 Generate Complete Report (MS Word)", type="primary"):
+            try:
+                from src.report_generator import HydrologyReportGenerator
+                
+                # Prepare rainfall data
+                rainfall_stats = {}
+                if 'rainfall_df' in st.session_state:
+                    df = st.session_state.rainfall_df
+                    rainfall_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
+                    rainfall_data = df[rainfall_col].values
+                    
+                    rainfall_stats = {
+                        'n_years': len(rainfall_data),
+                        'mean': float(np.mean(rainfall_data)),
+                        'max': float(np.max(rainfall_data)),
+                        'min': float(np.min(rainfall_data)),
+                        'std': float(np.std(rainfall_data))
+                    }
+                
+                # Prepare scour data
+                scour_data = {}
+                if hasattr(st.session_state, 'scour_results'):
+                    scour_data = st.session_state.scour_results
+                
+                # Generate report
+                report_gen = HydrologyReportGenerator(
+                    catchment_data=catchment,
+                    rainfall_data=rainfall_stats,
+                    discharge_data=results,
+                    scour_data=scour_data,
+                    rainfall_analysis=st.session_state.get('rainfall_results', {})
+                )
+                
+                # Save to temporary file
+                report_path = f"hydrology_report_{catchment.get('bridge_name', 'bridge')}.docx"
+                report_gen.generate_report(report_path)
+                
+                # Read file for download
+                with open(report_path, 'rb') as f:
+                    report_bytes = f.read()
+                
+                st.download_button(
+                    label="📥 Download Report (DOCX)",
+                    data=report_bytes,
+                    file_name=report_path,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+                
+                st.success("✅ Report generated successfully!")
+                
+            except Exception as e:
+                st.error(f"Error generating report: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+        
         st.markdown("---")
         st.success(f"**Upstream Boundary Condition for HEC-RAS: {results.get('Design_Discharge', 0):.2f} m³/s**")
         
+        # Additional info
+        st.info("""
+        **Report Includes:**
+        - ✅ Executive Summary
+        - ✅ Catchment Characteristics (Table 1)
+        - ✅ Rainfall Statistics & Frequency Analysis
+        - ✅ Goodness-of-Fit Test Results
+        - ✅ Return Period Rainfall (2, 5, 10, 20, 50, 100, 200 years)
+        - ✅ Discharge Analysis (All 4 Methods - Table 5)
+        - ✅ Scour Calculations (Tables 7, 8, 9)
+        - ✅ Conclusions & Recommendations
+        - ✅ Methodology & References
+        """)
+        
     else:
-        st.warning("⚠️ Please run analysis first to export results")
+        st.warning("⚠️ Please run discharge analysis first (Tab 3)")
