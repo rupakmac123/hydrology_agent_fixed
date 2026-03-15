@@ -1,17 +1,14 @@
 """
 Comprehensive Report Generator for Bridge Hydrology Agent
-Generates professional MS Word reports matching DoR Nepal standards
 """
 
 from docx import Document
-from docx.shared import Inches, Pt
+from docx.shared import Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
 
+
 class HydrologyReportGenerator:
-    """
-    Generates comprehensive hydrology reports in MS Word format
-    """
     
     def __init__(self, catchment_data: dict, rainfall_data: dict, 
                  discharge_data: dict, scour_data: dict,
@@ -22,9 +19,8 @@ class HydrologyReportGenerator:
         self.scour = scour_data
         self.rainfall_analysis = rainfall_analysis or {}
         self.doc = Document()
-        
+    
     def _add_title_page(self):
-        """Add professional title page"""
         title = self.doc.add_heading('BRIDGE HYDROLOGY REPORT', 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
@@ -60,10 +56,8 @@ class HydrologyReportGenerator:
         self.doc.add_page_break()
     
     def _add_catchment_characteristics(self):
-        """Add catchment characteristics (Table 1 format)"""
         self.doc.add_heading('1. CATCHMENT CHARACTERISTICS', level=1)
         
-        # ✅ FIXED: 8 rows (1 header + 7 data rows)
         table = self.doc.add_table(rows=8, cols=2)
         table.style = 'Light Grid Accent 1'
         
@@ -89,14 +83,11 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def _add_rainfall_analysis(self):
-        """Add rainfall analysis section"""
         self.doc.add_heading('2. RAINFALL FREQUENCY ANALYSIS', level=1)
         
-        # Rainfall Statistics
         self.doc.add_heading('2.1 Rainfall Statistics', level=2)
         
         if self.rainfall:
-            # ✅ FIXED: 6 rows (1 header + 5 data rows)
             table = self.doc.add_table(rows=6, cols=2)
             table.style = 'Light Grid Accent 1'
             
@@ -113,7 +104,6 @@ class HydrologyReportGenerator:
                 row_cells[0].text = param
                 row_cells[1].text = value
         
-        # Goodness-of-Fit Tests
         self.doc.add_heading('2.2 Goodness-of-Fit Tests', level=2)
         
         if self.rainfall_analysis.get('test_results'):
@@ -132,7 +122,10 @@ class HydrologyReportGenerator:
                 row_cells[0].text = dist_name
                 row_cells[1].text = f"{results.get('KS_statistic', 0):.4f}"
                 row_cells[2].text = f"{results.get('KS_pvalue', 0):.4f}"
-                row_cells[3].text = f"{results.get('Chi2_statistic', 0):.4f}"
+                
+                chi2_val = results.get('Chi2_statistic')
+                row_cells[3].text = f"{chi2_val:.4f}" if chi2_val is not None else "N/A"
+                
                 row_cells[4].text = f"{results.get('score', 0):.4f}"
             
             if self.rainfall_analysis.get('best_distribution'):
@@ -140,7 +133,6 @@ class HydrologyReportGenerator:
                 p.add_run('\nBest Fitting Distribution: ').bold = True
                 p.add_run(self.rainfall_analysis['best_distribution'])
         
-        # Return Period Rainfall
         self.doc.add_heading('2.3 Return Period Rainfall Estimates', level=2)
         
         if self.rainfall_analysis.get('rainfall_estimates'):
@@ -170,7 +162,6 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def _add_discharge_analysis(self):
-        """Add discharge analysis (Table 5 format)"""
         self.doc.add_heading('3. PEAK DISCHARGE ANALYSIS', level=1)
         
         table = self.doc.add_table(rows=1, cols=2)
@@ -209,19 +200,16 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def _add_scour_calculation(self):
-        """Add scour calculation (Tables 7, 8, 9 format)"""
         self.doc.add_heading('4. SCOUR DEPTH CALCULATION', level=1)
         
         if not self.scour:
             self.doc.add_paragraph('Scour calculation data not available.')
             return
         
-        # Table 7: Parameters
         self.doc.add_heading('4.1 Scour Parameters', level=2)
         
         if self.scour.get('parameters'):
             params = self.scour['parameters']
-            # ✅ FIXED: 6 rows (1 header + 5 data rows)
             table = self.doc.add_table(rows=6, cols=2)
             table.style = 'Light Grid Accent 1'
             
@@ -238,7 +226,6 @@ class HydrologyReportGenerator:
                 row_cells[0].text = param
                 row_cells[1].text = value
         
-        # Table 8: Mean Scour
         self.doc.add_heading('4.2 Mean Scour Calculation', level=2)
         
         table = self.doc.add_table(rows=1, cols=5)
@@ -261,7 +248,6 @@ class HydrologyReportGenerator:
                 row_cells[3].text = f"{scour_data.get('D_blench', 0):.2f} m"
                 row_cells[4].text = f"{scour_data.get('D_adopted', 0):.2f} m"
         
-        # Table 9: Pier and Abutment Scour
         self.doc.add_heading('4.3 Pier and Abutment Scour', level=2)
         
         table = self.doc.add_table(rows=1, cols=3)
@@ -309,7 +295,6 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def generate_report(self, output_path: str) -> str:
-        """Generate complete report and save to DOCX"""
         self._add_title_page()
         self._add_catchment_characteristics()
         self._add_rainfall_analysis()
