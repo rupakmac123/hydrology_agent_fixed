@@ -98,12 +98,18 @@ class RainfallFrequencyAnalysis:
         Perform Chi-Square, KS, and Anderson-Darling tests
         Returns ranking of best fit distributions
         
-        NOTE: Anderson-Darling only supports: 'expon', 'logistic', 'gumbel_r', 'gumbel_l', 'norm'
+        NOTE: Anderson-Darling only supports: 'expon', 'logistic', 'gumbel_r', 'gumbel_l', 'norm', 'weibull_min'
         """
         test_results = {}
         
-        # Anderson-Darling supported distributions
-        ad_supported = {'gumbel_r': 'Gumbel', 'norm': 'Normal', 'expon': 'Exponential'}
+        # Anderson-Darling supported distributions mapping
+        ad_supported = {
+            'gumbel_r': 'Gumbel',
+            'norm': 'Normal', 
+            'expon': 'Exponential',
+            'logistic': 'Logistic',
+            'weibull_min': 'Weibull'
+        }
         
         for name, dist_info in distributions.items():
             dist = dist_info['distribution']
@@ -114,7 +120,7 @@ class RainfallFrequencyAnalysis:
             # Kolmogorov-Smirnov Test (works for all distributions)
             try:
                 ks_stat, ks_pvalue = stats.kstest(data_to_test, dist.cdf)
-            except:
+            except Exception as e:
                 ks_stat, ks_pvalue = 1.0, 0.0
             
             # Chi-Square Test (binned) - works for all distributions
@@ -125,30 +131,32 @@ class RainfallFrequencyAnalysis:
                 # Avoid division by zero
                 expected_freq = np.maximum(expected_freq, 1e-10)
                 chi2_stat, chi2_pvalue = stats.chisquare(observed_freq, expected_freq)
-            except:
+            except Exception as e:
                 chi2_stat, chi2_pvalue = 1.0, 0.0
             
             # Anderson-Darling Test (only for supported distributions)
             ad_statistic = None
             ad_critical_values = None
-            ad_significance_level = None
             
-            if name in ad_supported or (name == 'Gumbel' and 'gumbel_r' in str(dist)):
+            # Check if this distribution is supported by Anderson-Darling
+            ad_dist_name = None
+            for ad_key, ad_name in ad_supported.items():
+                if name.lower() == ad_name.lower() or ad_key in name.lower():
+                    ad_dist_name = ad_key
+                    break
+            
+            # Special handling for Gumbel
+            if name == 'Gumbel':
+                ad_dist_name = 'gumbel_r'
+            
+            if ad_dist_name:
                 try:
-                    ad_result = stats.anderson(data_to_test, dist='gumbel_r')
+                    ad_result = stats.anderson(data_to_test, dist=ad_dist_name)
                     ad_statistic = ad_result.statistic
                     ad_critical_values = ad_result.critical_values
-                    ad_significance_level = ad_result.significance_level
-                except:
-                    pass
-            elif name == 'Normal':
-                try:
-                    ad_result = stats.anderson(data_to_test, dist='norm')
-                    ad_statistic = ad_result.statistic
-                    ad_critical_values = ad_result.critical_values
-                    ad_significance_level = ad_result.significance_level
-                except:
-                    pass
+                except Exception as e:
+                    ad_statistic = None
+                    ad_critical_values = None
             
             # Calculate overall score (higher is better)
             score = ks_pvalue + chi2_pvalue
@@ -199,7 +207,7 @@ class RainfallFrequencyAnalysis:
                     rainfall_mm = dist.ppf(p)
                 
                 results[f'{T}_year'] = round(float(rainfall_mm), 2)
-            except:
+            except Exception as e:
                 results[f'{T}_year'] = 0.0
         
         return results

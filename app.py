@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.discharge import DischargeCalculator
 from src.rainfall import RainfallFrequencyAnalysis
 from src.reporter import ReportGenerator
+from src.scour import ScourCalculator  # ADD THIS LINE
 
 # Page configuration
 st.set_page_config(
