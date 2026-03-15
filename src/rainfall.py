@@ -94,16 +94,18 @@ class RainfallFrequencyAnalysis:
             is_log = dist_info.get('is_log', False)
             
             data_to_test = np.log(self.data) if is_log else self.data
+            n = len(data_to_test)
             
+            # Kolmogorov-Smirnov Test
             try:
                 ks_stat, ks_pvalue = stats.kstest(data_to_test, dist.cdf)
             except Exception:
                 ks_stat, ks_pvalue = 1.0, 0.0
             
+            # Chi-Square Test
             chi2_stat, chi2_pvalue = None, None
             
             try:
-                n = len(data_to_test)
                 n_bins = 5 if n < 50 else 7
                 
                 data_min = np.min(data_to_test)
@@ -139,6 +141,7 @@ class RainfallFrequencyAnalysis:
             except Exception as e:
                 chi2_stat, chi2_pvalue = None, None
             
+            # Anderson-Darling Test
             ad_statistic = None
             
             ad_dist_name = None
@@ -157,6 +160,7 @@ class RainfallFrequencyAnalysis:
                 except Exception:
                     ad_statistic = None
             
+            # Calculate overall score
             score = ks_pvalue
             
             if chi2_pvalue is not None:
@@ -204,6 +208,9 @@ class RainfallFrequencyAnalysis:
         return results
     
     def full_analysis(self, return_periods: List[int] = None) -> Dict:
+        """
+        Complete rainfall frequency analysis workflow
+        """
         if return_periods is None:
             return_periods = [2, 5, 10, 20, 50, 100, 200]
         
@@ -215,8 +222,12 @@ class RainfallFrequencyAnalysis:
                     'best_distribution': 'Laplace (Report Default)',
                     'R100yr': 519.38,
                     'rainfall_estimates': {
-                        '2_year': 150.0, '5_year': 250.0, '10_year': 350.0,
-                        '20_year': 420.0, '50_year': 480.0, '100_year': 519.38,
+                        '2_year': 150.0,
+                        '5_year': 250.0,
+                        '10_year': 350.0,
+                        '20_year': 420.0,
+                        '50_year': 480.0,
+                        '100_year': 519.38,
                         '200_year': 580.0
                     }
                 }
@@ -239,8 +250,12 @@ class RainfallFrequencyAnalysis:
                 'best_distribution': 'Laplace (Report Default)',
                 'R100yr': 519.38,
                 'rainfall_estimates': {
-                    '2_year': 150.0, '5_year': 250.0, '10_year': 350.0,
-                    '20_year': 420.0, '50_year': 480.0, '100_year': 519.38,
+                    '2_year': 150.0,
+                    '5_year': 250.0,
+                    '10_year': 350.0,
+                    '20_year': 420.0,
+                    '50_year': 480.0,
+                    '100_year': 519.38,
                     '200_year': 580.0
                 }
             }
