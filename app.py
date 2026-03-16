@@ -336,26 +336,50 @@ with tab5:
     if st.session_state.results:
         st.subheader("Basic Parameters (Table 7)")
         
+        # Auto-calculate Q_scour from Q100
+        Q100 = st.session_state.results.get('Adopted_Q100', 0)
+        Q_scour_auto = Q100 * 1.30  # Scour uses 30% higher than Q100
+        Q_design_from_tab3 = st.session_state.results.get('Design_Discharge', 0)
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
+            # Show both values for clarity
+            st.info(f"""
+            **From Tab 3:**
+            - Q100: {Q100:.2f} m³/s
+            - Q_design (×1.10): {Q_design_from_tab3:.2f} m³/s
+            """)
+            
             Q_design = st.number_input(
-                "Design Discharge Q (m³/s)",
-                value=st.session_state.results['Design_Discharge'],
+                "Discharge for Scour Analysis Q (m³/s)",
+                value=round(Q_scour_auto, 2),  # Default to Q100 × 1.30
                 step=0.01,
-                key="scour_Q_design"
+                key="scour_Q_design",
+                help="Scour analysis uses Q100 × 1.30 (higher than design discharge)"
             )
+            
             L_bridge = st.number_input("Bridge Length (m)", value=226.17, step=0.01)
         
         with col2:
-            dmean_mm = st.number_input("dmean (mm)", value=2.8, step=0.1)
-            Ksf = st.number_input("Ksf (Silt Factor)", value=2.9, step=0.1)
+            dmean_mm = st.number_input("dmean (mm)", value=2.8, step=0.1, help="Mean diameter of bed material")
+            Ksf = st.number_input("Ksf (Silt Factor)", value=2.9, step=0.1, help="Ksf = 1.76 × √(dmean)")
         
         with col3:
-            Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1)
+            Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1, help="Blench's Zero Bed Factor")
             freeboard = st.number_input("Freeboard (m)", value=1.5, step=0.1)
         
-        # Auto-calculate q from Q_design
+        # Show discharge relationship
+        st.markdown("---")
+        st.success(f"""
+        **📊 Discharge Summary:**
+        - Q100 (100-year flood): **{Q100:.2f} m³/s**
+        - Q_design (for structure, Q100 × 1.10): **{Q_design_from_tab3:.2f} m³/s**
+        - Q_scour (for scour, Q100 × 1.30): **{Q_scour_auto:.2f} m³/s**
+        - **Using for scour calculation: {Q_design:.2f} m³/s**
+        """)
+        
+        # Auto-calculate q from Q
         st.markdown("---")
         st.subheader("📊 Discharge Intensity (Auto-Calculated)")
         
@@ -364,7 +388,8 @@ with tab5:
             min_value=0.5,
             max_value=1.0,
             value=0.8,
-            step=0.05
+            step=0.05,
+            help="Fraction of bridge length used for flow distribution"
         )
         
         effective_width = L_bridge * width_factor
@@ -372,39 +397,63 @@ with tab5:
         
         st.info(f"""
         **📈 Auto-Calculated Values:**
-        - Effective Width: {effective_width:.2f} m
+        - Effective Width: {effective_width:.2f} m ({width_factor*100:.0f}% of bridge length)
         - Average Discharge Intensity (q_avg): **{q_auto:.3f} m²/s**
         """)
         
-        use_auto_q = st.checkbox("✅ Use auto-calculated q values", value=True)
+        use_auto_q = st.checkbox("✅ Use auto-calculated q values from Q", value=True)
         
-        st.subheader("Cross-Section Analysis")
+        st.subheader("Cross-Section Analysis (Table 8 & 9)")
         
         # Upstream section
         st.markdown("**Upstream Section**")
         col1, col2 = st.columns(2)
         with col1:
             HFL_US = st.number_input("HFL US (m)", value=219.06, step=0.01)
-            q_avg_US = st.number_input("q avg US (m²/s)", 
-                                      value=round(q_auto * 0.9, 2) if use_auto_q else 5.21, 
-                                      step=0.01)
+            if use_auto_q:
+                q_avg_US = st.number_input(
+                    "q avg US (m²/s)", 
+                    value=round(q_auto * 0.9, 2),
+                    step=0.01,
+                    key="q_avg_US"
+                )
+            else:
+                q_avg_US = st.number_input("q avg US (m²/s)", value=5.21, step=0.01, key="q_avg_US_manual")
         with col2:
-            q_max_US = st.number_input("q max US (m²/s)", 
-                                      value=round(q_auto * 1.3, 2) if use_auto_q else 7.7, 
-                                      step=0.01)
+            if use_auto_q:
+                q_max_US = st.number_input(
+                    "q max US (m²/s)", 
+                    value=round(q_auto * 1.3, 2),
+                    step=0.01,
+                    key="q_max_US"
+                )
+            else:
+                q_max_US = st.number_input("q max US (m²/s)", value=7.7, step=0.01, key="q_max_US_manual")
         
         # Existing bridge section
         st.markdown("**Existing Bridge Section**")
         col1, col2 = st.columns(2)
         with col1:
             HFL_EX = st.number_input("HFL EX (m)", value=218.6, step=0.01)
-            q_avg_EX = st.number_input("q avg EX (m²/s)", 
-                                      value=round(q_auto, 2) if use_auto_q else 5.28, 
-                                      step=0.01)
+            if use_auto_q:
+                q_avg_EX = st.number_input(
+                    "q avg EX (m²/s)", 
+                    value=round(q_auto, 2),
+                    step=0.01,
+                    key="q_avg_EX"
+                )
+            else:
+                q_avg_EX = st.number_input("q avg EX (m²/s)", value=5.28, step=0.01, key="q_avg_EX_manual")
         with col2:
-            q_max_EX = st.number_input("q max EX (m²/s)", 
-                                      value=round(q_auto * 1.4, 2) if use_auto_q else 8.1, 
-                                      step=0.01)
+            if use_auto_q:
+                q_max_EX = st.number_input(
+                    "q max EX (m²/s)", 
+                    value=round(q_auto * 1.4, 2),
+                    step=0.01,
+                    key="q_max_EX"
+                )
+            else:
+                q_max_EX = st.number_input("q max EX (m²/s)", value=8.1, step=0.01, key="q_max_EX_manual")
         
         # Calculate scour
         if st.button("🔍 Calculate Scour Depths", type="primary"):
@@ -417,7 +466,10 @@ with tab5:
                     Blench_Fb=Blench_Fb
                 )
                 
+                # Upstream
                 scour_US = scour_calc.full_scour_analysis(HFL_US, q_avg_US, q_max_US)
+                
+                # Existing
                 scour_EX = scour_calc.full_scour_analysis(HFL_EX, q_avg_EX, q_max_EX)
                 
                 # Display Table 8
@@ -470,6 +522,8 @@ with tab5:
                 st.session_state.scour_results = {
                     'parameters': {
                         'Q_design': Q_design,
+                        'Q100': Q100,
+                        'Q_scour_used': Q_design,
                         'L_bridge': L_bridge,
                         'dmean_mm': dmean_mm,
                         'Ksf': Ksf,
@@ -513,7 +567,7 @@ with tab5:
                     }
                 }
                 
-                st.success("✅ Scour calculation completed and saved for report!")
+                st.success(f"✅ Scour calculation completed using Q = {Q_design:.2f} m³/s!")
                 
             except Exception as e:
                 st.error(f"❌ Scour calculation error: {e}")
