@@ -1,5 +1,6 @@
 """
 Comprehensive Report Generator for Bridge Hydrology Agent
+Generates professional MS Word reports matching DoR Nepal standards
 """
 
 from docx import Document
@@ -210,7 +211,7 @@ class HydrologyReportGenerator:
         
         if self.scour.get('parameters'):
             params = self.scour['parameters']
-            table = self.doc.add_table(rows=6, cols=2)
+            table = self.doc.add_table(rows=9, cols=2)
             table.style = 'Light Grid Accent 1'
             
             param_data = [
@@ -218,7 +219,10 @@ class HydrologyReportGenerator:
                 ('Bridge Length (L)', f"{params.get('L_bridge', 0):.2f} m"),
                 ('Mean Bed Material Size (dmean)', f"{params.get('dmean_mm', 0):.2f} mm"),
                 ('Silt Factor (Ksf)', f"{params.get('Ksf', 0):.2f}"),
-                ("Blench's Zero Bed Factor (Fb)", f"{params.get('Blench_Fb', 0):.2f}")
+                ("Blench's Zero Bed Factor (Fb)", f"{params.get('Blench_Fb', 0):.2f}"),
+                ('Average Discharge Intensity (q_avg)', f"{params.get('q_avg', 0):.3f} m²/s"),
+                ('Maximum Discharge Intensity (q_max)', f"{params.get('q_max', 0):.3f} m²/s"),
+                ('Water Surface Elevation (HFL/WSE)', f"{params.get('HFL', 0):.2f} m")
             ]
             
             for i, (param, value) in enumerate(param_data):
@@ -228,69 +232,54 @@ class HydrologyReportGenerator:
         
         self.doc.add_heading('4.2 Mean Scour Calculation', level=2)
         
-        table = self.doc.add_table(rows=1, cols=5)
+        table = self.doc.add_table(rows=1, cols=2)
         table.style = 'Light Grid Accent 1'
         
         hdr_cells = table.rows[0].cells
-        hdr_cells[0].text = 'Section'
-        hdr_cells[1].text = "Lacey's (avg q)"
-        hdr_cells[2].text = "Lacey's (max q)"
-        hdr_cells[3].text = "Blench's"
-        hdr_cells[4].text = 'Adopted'
+        hdr_cells[0].text = 'Method'
+        hdr_cells[1].text = 'Scour Depth (m)'
         
-        for section_name in ['upstream', 'existing']:
-            if section_name in self.scour:
-                scour_data = self.scour[section_name]['mean_scour']
+        if 'bridge_section' in self.scour:
+            scour_data = self.scour['bridge_section']['mean_scour']
+            
+            methods = [
+                ("Lacey's (avg q)", scour_data.get('D_lacey_avg', 0)),
+                ("Lacey's (max q)", scour_data.get('D_lacey_max', 0)),
+                ("Blench's", scour_data.get('D_blench', 0)),
+                ('Adopted', scour_data.get('D_adopted', 0))
+            ]
+            
+            for method_name, value in methods:
                 row_cells = table.add_row().cells
-                row_cells[0].text = section_name.title()
-                row_cells[1].text = f"{scour_data.get('D_lacey_avg', 0):.2f} m"
-                row_cells[2].text = f"{scour_data.get('D_lacey_max', 0):.2f} m"
-                row_cells[3].text = f"{scour_data.get('D_blench', 0):.2f} m"
-                row_cells[4].text = f"{scour_data.get('D_adopted', 0):.2f} m"
+                row_cells[0].text = method_name
+                row_cells[1].text = f"{value:.2f} m"
         
         self.doc.add_heading('4.3 Pier and Abutment Scour', level=2)
         
-        table = self.doc.add_table(rows=1, cols=3)
+        table = self.doc.add_table(rows=1, cols=2)
         table.style = 'Light Grid Accent 1'
         
         hdr_cells = table.rows[0].cells
         hdr_cells[0].text = 'Parameter'
-        hdr_cells[1].text = 'Upstream'
-        hdr_cells[2].text = 'Existing'
+        hdr_cells[1].text = 'Value'
         
-        params = [
-            'Adopted Mean Scour D (m)',
-            'Scour Depth - Abutment (m)',
-            'Scour Depth - Pier (m)',
-            'Scour Level - Abutment (m)',
-            'Scour Level - Pier (m)',
-            'Minimum Soffit Level (m)'
-        ]
-        
-        for param in params:
-            row_cells = table.add_row().cells
-            row_cells[0].text = param
+        if 'bridge_section' in self.scour:
+            data = self.scour['bridge_section']
             
-            for section_name in ['upstream', 'existing']:
-                if section_name in self.scour:
-                    data = self.scour[section_name]
-                    
-                    if 'Mean Scour' in param:
-                        value = data['mean_scour'].get('D_adopted', 0)
-                    elif 'Abutment' in param and 'Depth' in param:
-                        value = data['pier_abutment_scour'].get('D_abutment', 0)
-                    elif 'Pier' in param and 'Depth' in param:
-                        value = data['pier_abutment_scour'].get('D_pier', 0)
-                    elif 'Abutment' in param and 'Level' in param:
-                        value = data['scour_levels'].get('scour_level_abutment', 0)
-                    elif 'Pier' in param and 'Level' in param:
-                        value = data['scour_levels'].get('scour_level_pier', 0)
-                    elif 'Soffit' in param:
-                        value = data.get('min_soffit_level', 0)
-                    else:
-                        value = 0
-                    
-                    row_cells[1 if section_name == 'upstream' else 2].text = f"{value:.2f}"
+            params = [
+                ('Adopted Mean Scour D (m)', data['mean_scour'].get('D_adopted', 0)),
+                ('Scour Depth - Abutment (m)', data['pier_abutment_scour'].get('D_abutment', 0)),
+                ('Scour Depth - Pier (m)', data['pier_abutment_scour'].get('D_pier', 0)),
+                ('Scour Level - Abutment (m)', data['scour_levels'].get('scour_level_abutment', 0)),
+                ('Scour Level - Pier (m)', data['scour_levels'].get('scour_level_pier', 0)),
+                ('Minimum Soffit Level (m)', data.get('min_soffit_level', 0)),
+                ('Water Surface Elevation (HFL/WSE)', data.get('HFL', 0))
+            ]
+            
+            for param_name, value in params:
+                row_cells = table.add_row().cells
+                row_cells[0].text = param_name
+                row_cells[1].text = f"{value:.2f}"
         
         self.doc.add_paragraph()
     

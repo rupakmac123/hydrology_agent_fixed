@@ -12,18 +12,11 @@ from typing import Dict, List
 class RainfallFrequencyAnalysis:
     """
     Performs frequency distribution analysis on rainfall data
-    (Section 3.2 from report)
     """
     
     def __init__(self, rainfall_csv_path: str):
-        """
-        Initialize with rainfall CSV file
-        
-        CSV Format: Year, Max_24hr_Rainfall (mm)
-        """
         self.df = pd.read_csv(rainfall_csv_path)
         
-        # Auto-detect rainfall column
         if 'Max_24hr_Rainfall' in self.df.columns:
             self.data = self.df['Max_24hr_Rainfall'].values
         elif len(self.df.columns) > 1:
@@ -34,13 +27,8 @@ class RainfallFrequencyAnalysis:
         self.years = self.df.iloc[:, 0].values if len(self.df.columns) > 1 else range(len(self.data))
     
     def fit_distributions(self) -> Dict:
-        """
-        Fit multiple distributions and return parameters
-        Distributions: GEV, Gumbel, Log-Pearson III, Normal, Laplace
-        """
         results = {}
         
-        # GEV (Generalized Extreme Value)
         try:
             gev_params = stats.genextreme.fit(self.data)
             results['GEV'] = {
@@ -50,7 +38,6 @@ class RainfallFrequencyAnalysis:
         except Exception as e:
             print(f"GEV fit error: {e}")
         
-        # Gumbel (Extreme Value Type I)
         try:
             gumbel_params = stats.gumbel_r.fit(self.data)
             results['Gumbel'] = {
@@ -60,7 +47,6 @@ class RainfallFrequencyAnalysis:
         except Exception as e:
             print(f"Gumbel fit error: {e}")
         
-        # Normal
         try:
             normal_params = stats.norm.fit(self.data)
             results['Normal'] = {
@@ -70,7 +56,6 @@ class RainfallFrequencyAnalysis:
         except Exception as e:
             print(f"Normal fit error: {e}")
         
-        # Log-Pearson Type III (manual implementation)
         try:
             log_data = np.log(self.data)
             lp3_params = stats.pearson3.fit(log_data)
@@ -82,7 +67,6 @@ class RainfallFrequencyAnalysis:
         except Exception as e:
             print(f"Log-Pearson III fit error: {e}")
         
-        # Laplace (as used in Ratu Report)
         try:
             laplace_params = stats.laplace.fit(self.data)
             results['Laplace'] = {
@@ -95,13 +79,8 @@ class RainfallFrequencyAnalysis:
         return results
     
     def goodness_of_fit_tests(self, distributions: Dict) -> Dict:
-        """
-        Perform Chi-Square, KS, and Anderson-Darling tests
-        Returns ranking of best fit distributions
-        """
         test_results = {}
         
-        # Anderson-Darling supported distributions
         ad_supported = {
             'gumbel_r': 'Gumbel',
             'norm': 'Normal',
@@ -117,88 +96,63 @@ class RainfallFrequencyAnalysis:
             data_to_test = np.log(self.data) if is_log else self.data
             n = len(data_to_test)
             
-            # ─────────────────────────────────────────────────────────────
-            # Kolmogorov-Smirnov Test (works for all distributions)
-            # ─────────────────────────────────────────────────────────────
+            # Kolmogorov-Smirnov Test
             try:
                 ks_stat, ks_pvalue = stats.kstest(data_to_test, dist.cdf)
             except Exception:
                 ks_stat, ks_pvalue = 1.0, 0.0
             
-            # ─────────────────────────────────────────────────────────────
-            # Chi-Square Test - Robust Version for Small Samples
-            # ─────────────────────────────────────────────────────────────
+            # Chi-Square Test - Robust Version
             chi2_stat, chi2_pvalue = None, None
             
             try:
-                # Sort data for consistent binning
                 sorted_data = np.sort(data_to_test)
-                
-                # Use 4 bins for n=36 (conservative, ensures ~9 points per bin)
                 n_bins = 4
                 
-                # Create bins using percentiles (quartiles)
                 percentiles = [0, 25, 50, 75, 100]
                 bin_edges = np.percentile(sorted_data, percentiles)
-                
-                # Ensure unique edges (handle tied values)
                 bin_edges = np.unique(bin_edges)
                 
-                # If not enough unique edges, use fixed-width bins
                 if len(bin_edges) < 3:
                     data_min = np.min(sorted_data) - 0.01
                     data_max = np.max(sorted_data) + 0.01
                     bin_edges = np.linspace(data_min, data_max, n_bins + 1)
                 
-                # Count observed frequencies in each bin
                 observed_freq = np.zeros(len(bin_edges) - 1)
                 for i in range(len(bin_edges) - 1):
                     if i == len(bin_edges) - 2:
-                        # Last bin includes right edge
                         mask = (sorted_data >= bin_edges[i]) & (sorted_data <= bin_edges[i + 1])
                     else:
                         mask = (sorted_data >= bin_edges[i]) & (sorted_data < bin_edges[i + 1])
                     observed_freq[i] = np.sum(mask)
                 
-                # Calculate expected probabilities from fitted distribution
                 expected_prob = np.zeros(len(bin_edges) - 1)
                 for i in range(len(bin_edges) - 1):
                     expected_prob[i] = dist.cdf(bin_edges[i + 1]) - dist.cdf(bin_edges[i])
                 
-                # Expected frequencies
                 expected_freq = expected_prob * n
                 
-                # Normalize to match observed total (important for validity)
                 if np.sum(expected_freq) > 0:
                     expected_freq = expected_freq * (np.sum(observed_freq) / np.sum(expected_freq))
                 
-                # Ensure minimum value to avoid division by zero
                 expected_freq = np.maximum(expected_freq, 0.1)
                 
-                # Only perform test if we have enough bins and data
                 if len(expected_freq) >= 2 and np.sum(observed_freq) > 0:
-                    # Degrees of freedom = bins - 1 - parameters_estimated
-                    # Most distributions estimate 2-3 parameters
                     ddof = max(0, len(expected_freq) - 1 - 2)
                     
-                    # Perform Chi-Square test
                     chi2_stat, chi2_pvalue = stats.chisquare(
                         f_obs=observed_freq,
                         f_exp=expected_freq,
                         ddof=ddof
                     )
                     
-                    # Validate p-value (must be between 0 and 1)
                     if chi2_pvalue is None or chi2_pvalue < 0 or chi2_pvalue > 1:
                         chi2_stat, chi2_pvalue = None, None
                         
             except Exception as e:
-                # Chi-Square failed - keep as None
                 chi2_stat, chi2_pvalue = None, None
             
-            # ─────────────────────────────────────────────────────────────
-            # Anderson-Darling Test (only for supported distributions)
-            # ─────────────────────────────────────────────────────────────
+            # Anderson-Darling Test
             ad_statistic = None
             
             ad_dist_name = None
@@ -207,7 +161,6 @@ class RainfallFrequencyAnalysis:
                     ad_dist_name = ad_key
                     break
             
-            # Special handling for Gumbel
             if name == 'Gumbel':
                 ad_dist_name = 'gumbel_r'
             
@@ -218,16 +171,13 @@ class RainfallFrequencyAnalysis:
                 except Exception:
                     ad_statistic = None
             
-            # ─────────────────────────────────────────────────────────────
-            # Calculate overall score (higher is better)
-            # ─────────────────────────────────────────────────────────────
+            # Calculate overall score
             score = ks_pvalue
             
             if chi2_pvalue is not None:
                 score += chi2_pvalue * 0.5
             
             if ad_statistic is not None:
-                # Lower AD statistic is better; invert for scoring
                 score += (1.0 / (1.0 + ad_statistic)) * 0.3
             
             test_results[name] = {
@@ -242,31 +192,21 @@ class RainfallFrequencyAnalysis:
         return test_results
     
     def get_best_distribution(self, test_results: Dict) -> str:
-        """
-        Recommend best fitting distribution based on test results
-        """
         if not test_results:
-            return 'Laplace'  # Default as per Ratu Report
+            return 'Laplace'
         
-        best_dist = max(test_results.keys(), 
-                       key=lambda x: test_results[x]['score'])
+        best_dist = max(test_results.keys(), key=lambda x: test_results[x]['score'])
         return best_dist
     
-    def calculate_return_period_rainfall(self, distribution: dict, 
-                                         return_periods: List[int]) -> Dict:
-        """
-        Calculate rainfall depth for different return periods
-        """
+    def calculate_return_period_rainfall(self, distribution: dict, return_periods: List[int]) -> Dict:
         dist = distribution['distribution']
         is_log = distribution.get('is_log', False)
         
         results = {}
         for T in return_periods:
-            # Probability of exceedance
             p = 1 - (1 / T)
             
             try:
-                # Inverse CDF (Percent Point Function)
                 if is_log:
                     rainfall_mm = np.exp(dist.ppf(p))
                 else:
@@ -279,49 +219,27 @@ class RainfallFrequencyAnalysis:
         return results
     
     def full_analysis(self, return_periods: List[int] = None) -> Dict:
-        """
-        Complete rainfall frequency analysis workflow
-        
-        Args:
-            return_periods: List of return periods to calculate (default: 2,5,10,20,50,100,200)
-            
-        Returns:
-            Dictionary with best distribution, test results, and rainfall estimates
-        """
         if return_periods is None:
             return_periods = [2, 5, 10, 20, 50, 100, 200]
         
         try:
-            # Step 1: Fit distributions
             distributions = self.fit_distributions()
             
             if not distributions:
-                # Fallback to Ratu Report value
                 return {
                     'best_distribution': 'Laplace (Report Default)',
                     'R100yr': 519.38,
                     'rainfall_estimates': {
-                        '2_year': 150.0,
-                        '5_year': 250.0,
-                        '10_year': 350.0,
-                        '20_year': 420.0,
-                        '50_year': 480.0,
-                        '100_year': 519.38,
+                        '2_year': 150.0, '5_year': 250.0, '10_year': 350.0,
+                        '20_year': 420.0, '50_year': 480.0, '100_year': 519.38,
                         '200_year': 580.0
                     }
                 }
             
-            # Step 2: Perform goodness-of-fit tests
             test_results = self.goodness_of_fit_tests(distributions)
-            
-            # Step 3: Select best distribution
             best_dist_name = self.get_best_distribution(test_results)
             best_dist = distributions[best_dist_name]
-            
-            # Step 4: Calculate return period rainfall
-            rainfall_estimates = self.calculate_return_period_rainfall(
-                best_dist, return_periods
-            )
+            rainfall_estimates = self.calculate_return_period_rainfall(best_dist, return_periods)
             
             return {
                 'best_distribution': best_dist_name,
@@ -331,18 +249,13 @@ class RainfallFrequencyAnalysis:
             }
             
         except Exception as e:
-            # Fallback to Ratu Report value on any error
             print(f"Rainfall analysis error: {e}")
             return {
                 'best_distribution': 'Laplace (Report Default)',
                 'R100yr': 519.38,
                 'rainfall_estimates': {
-                    '2_year': 150.0,
-                    '5_year': 250.0,
-                    '10_year': 350.0,
-                    '20_year': 420.0,
-                    '50_year': 480.0,
-                    '100_year': 519.38,
+                    '2_year': 150.0, '5_year': 250.0, '10_year': 350.0,
+                    '20_year': 420.0, '50_year': 480.0, '100_year': 519.38,
                     '200_year': 580.0
                 }
             }

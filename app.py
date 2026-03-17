@@ -1,6 +1,6 @@
 """
-Hydrology Agent - Streamlit Web Interface
-Based on Ratu Bridge Hydrology Report (DoR Nepal)
+Bridge Hydrology Agent - Streamlit Web Interface
+Based on Department of Roads (DoR) Nepal Guidelines - Ratu Bridge Report
 """
 
 import streamlit as st
@@ -11,6 +11,9 @@ from pathlib import Path
 from datetime import datetime
 import sys
 import os
+import re
+import io
+import tempfile
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -18,7 +21,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.discharge import DischargeCalculator
 from src.rainfall import RainfallFrequencyAnalysis
 from src.reporter import ReportGenerator
-from src.scour import ScourCalculator  # ADD THIS LINE
+from src.scour import ScourCalculator
+from src.report_generator import HydrologyReportGenerator
+from src.hec_ras_parser import parse_hec_ras_file, parse_hec_ras_directory, parse_hec_ras_hdf_file, auto_parse_hec_ras
 
 # Page configuration
 st.set_page_config(
@@ -69,6 +74,12 @@ if 'catchment_props' not in st.session_state:
     st.session_state.catchment_props = None
 if 'rainfall_results' not in st.session_state:
     st.session_state.rainfall_results = None
+if 'rainfall_stats' not in st.session_state:
+    st.session_state.rainfall_stats = None
+if 'scour_results' not in st.session_state:
+    st.session_state.scour_results = None
+if 'hec_ras_data' not in st.session_state:
+    st.session_state.hec_ras_data = None
 
 # Main Content - Tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -76,8 +87,8 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "🌧️ Rainfall Data",
     "📊 Analysis Results",
     "📋 Report Table 5",
-    "🌊 Scour Calculation",      # ← NEW Tab 5
-    "💾 Export"                   # ← Moved to Tab 6
+    "🌊 Scour Calculation",
+    "💾 Export"
 ])
 
 # ============== TAB 1: Location & Catchment ==============
@@ -176,6 +187,7 @@ with tab2:
     if st.button("🔍 Run Frequency Analysis", type="primary"):
         if 'rainfall_df' in st.session_state:
             try:
+                # Save to temporary file for analysis
                 temp_path = Path("data/rainfall/temp_analysis.csv")
                 temp_path.parent.mkdir(parents=True, exist_ok=True)
                 st.session_state.rainfall_df.to_csv(temp_path, index=False)
@@ -184,6 +196,15 @@ with tab2:
                 analysis_results = rainfall_analysis.full_analysis()
                 
                 st.session_state.rainfall_results = analysis_results
+                
+                # Store rainfall statistics for report
+                st.session_state.rainfall_stats = {
+                    'n_years': len(st.session_state.rainfall_df),
+                    'mean': float(np.mean(rainfall_data)),
+                    'max': float(np.max(rainfall_data)),
+                    'min': float(np.min(rainfall_data)),
+                    'std': float(np.std(rainfall_data))
+                }
                 
                 col1, col2, col3 = st.columns(3)
                 
@@ -329,131 +350,204 @@ with tab4:
         st.warning("⚠️ Please run discharge analysis in Tab 3 first")
 
 # ============== TAB 5: Scour Calculation ==============
-# ============== TAB 5: Scour Calculation ==============
 with tab5:
     st.header("🌊 Scour Depth Analysis")
     
     if st.session_state.results:
+        st.subheader("📁 HEC-RAS Integration")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            upload_method = st.radio(
+                "Select Input Method:",
+                ["📤 Upload HEC-RAS Output File", "📂 Link to HEC-RAS Project Folder"]
+            )
+        
+        hec_ras_data = None
+        
+        # ─────────────────────────────────────────────────────────────
+        # Method 1: Upload HEC-RAS Output File
+        # ─────────────────────────────────────────────────────────────
+        if upload_method == "📤 Upload HEC-RAS Output File":
+            hec_ras_file = st.file_uploader(
+                "Upload HEC-RAS Output (.hdf, .out, .O01, .csv, .txt)",
+                type=['hdf', 'HDF', 'out', 'O01', 'txt', 'csv'],
+                help="Upload HEC-RAS output file (HDF5 recommended for automation)"
+            )
+            
+            if hec_ras_file:
+                # Check file type
+                filename = hec_ras_file.name.lower()
+                
+                if filename.endswith('.hdf'):
+                    # HDF5 file - save temporarily and parse
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.hdf') as tmp:
+                        tmp.write(hec_ras_file.read())
+                        tmp_path = tmp.name
+                    
+                    with st.spinner("🔍 Parsing HDF5 file..."):
+                        hec_ras_data = parse_hec_ras_hdf_file(tmp_path)
+                    
+                    # Clean up temp file
+                    os.unlink(tmp_path)
+                    
+                else:
+                    # Text or CSV file - use existing parser
+                    with st.spinner("🔍 Parsing output file..."):
+                        hec_ras_data = parse_hec_ras_file(hec_ras_file)
+                
+                if hec_ras_data:
+                    st.success("✅ HEC-RAS file parsed successfully!")
+                    st.session_state.hec_ras_data = hec_ras_data
+                else:
+                    st.error("❌ Could not parse HEC-RAS file. Please check file format.")
+        
+        # ─────────────────────────────────────────────────────────────
+        # Method 2: Link to HEC-RAS Project Folder
+        # ─────────────────────────────────────────────────────────────
+        else:
+            project_folder = st.text_input(
+                "HEC-RAS Project Folder Path:",
+                placeholder="C:\\Users\\user\\HEC-RAS\\Ratu_Bridge\\",
+                help="Agent will auto-detect HDF5, text, or CSV files"
+            )
+            
+            if project_folder:
+                if os.path.exists(project_folder):
+                    if st.button("🔍 Auto-Detect and Parse HEC-RAS Data"):
+                        with st.spinner("🔍 Scanning project folder..."):
+                            hec_ras_data = auto_parse_hec_ras(project_folder)
+                            
+                            if hec_ras_data:
+                                st.success("✅ HEC-RAS data extracted successfully!")
+                                st.session_state.hec_ras_data = hec_ras_data
+                            else:
+                                st.error("❌ Could not extract HEC-RAS data from folder")
+                else:
+                    st.error("❌ Folder path does not exist")
+        
+        # Display extracted HEC-RAS data
+        if hec_ras_data:
+            st.info(f"""
+            **✅ Extracted from HEC-RAS:**
+            - Water Surface Elevation (WSE/HFL): **{hec_ras_data.get('WSE', 'N/A')} m**
+            - Total Discharge (Q): **{hec_ras_data.get('Q_total', 'N/A')} m³/s**
+            - Bridge Discharge: **{hec_ras_data.get('Q_bridge', 'N/A')} m³/s**
+            - Top Width: **{hec_ras_data.get('top_width', 'N/A')} m**
+            - **Calculated q_avg: {hec_ras_data.get('q_avg', 'N/A')} m²/s**
+            - **Calculated q_max: {hec_ras_data.get('q_max', 'N/A')} m²/s**
+            """)
+        
         st.subheader("Basic Parameters (Table 7)")
         
         # Auto-calculate Q_scour from Q100
         Q100 = st.session_state.results.get('Adopted_Q100', 0)
-        Q_scour_auto = Q100 * 1.30  # Scour uses 30% higher than Q100
-        Q_design_from_tab3 = st.session_state.results.get('Design_Discharge', 0)
+        Q_scour_auto = Q100 * 1.30
         
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            # Show both values for clarity
             st.info(f"""
             **From Tab 3:**
             - Q100: {Q100:.2f} m³/s
-            - Q_design (×1.10): {Q_design_from_tab3:.2f} m³/s
+            - Q_scour (×1.30): {Q_scour_auto:.2f} m³/s
             """)
+            
+            # Use HEC-RAS Q if available, otherwise use calculated
+            default_Q = hec_ras_data.get('Q_bridge', Q_scour_auto) if hec_ras_data else Q_scour_auto
             
             Q_design = st.number_input(
                 "Discharge for Scour Analysis Q (m³/s)",
-                value=round(Q_scour_auto, 2),  # Default to Q100 × 1.30
+                value=round(default_Q, 2),
                 step=0.01,
-                key="scour_Q_design",
-                help="Scour analysis uses Q100 × 1.30 (higher than design discharge)"
+                key="scour_Q_design"
             )
             
             L_bridge = st.number_input("Bridge Length (m)", value=226.17, step=0.01)
         
         with col2:
-            dmean_mm = st.number_input("dmean (mm)", value=2.8, step=0.1, help="Mean diameter of bed material")
-            Ksf = st.number_input("Ksf (Silt Factor)", value=2.9, step=0.1, help="Ksf = 1.76 × √(dmean)")
+            dmean_mm = st.number_input("dmean (mm)", value=2.8, step=0.1)
+            Ksf = st.number_input("Ksf (Silt Factor)", value=2.9, step=0.1)
         
         with col3:
-            Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1, help="Blench's Zero Bed Factor")
+            Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1)
             freeboard = st.number_input("Freeboard (m)", value=1.5, step=0.1)
         
-        # Show discharge relationship
-        st.markdown("---")
-        st.success(f"""
-        **📊 Discharge Summary:**
-        - Q100 (100-year flood): **{Q100:.2f} m³/s**
-        - Q_design (for structure, Q100 × 1.10): **{Q_design_from_tab3:.2f} m³/s**
-        - Q_scour (for scour, Q100 × 1.30): **{Q_scour_auto:.2f} m³/s**
-        - **Using for scour calculation: {Q_design:.2f} m³/s**
-        """)
-        
-        # Auto-calculate q from Q
+        # ═══════════════════════════════════════════════════════════════
+        # Discharge Intensity - AUTO-CALCULATED (NOT MANUAL)
+        # ═══════════════════════════════════════════════════════════════
         st.markdown("---")
         st.subheader("📊 Discharge Intensity (Auto-Calculated)")
         
-        width_factor = st.slider(
-            "Effective Width Factor",
-            min_value=0.5,
-            max_value=1.0,
-            value=0.8,
-            step=0.05,
-            help="Fraction of bridge length used for flow distribution"
-        )
-        
-        effective_width = L_bridge * width_factor
-        q_auto = Q_design / effective_width
-        
-        st.info(f"""
-        **📈 Auto-Calculated Values:**
-        - Effective Width: {effective_width:.2f} m ({width_factor*100:.0f}% of bridge length)
-        - Average Discharge Intensity (q_avg): **{q_auto:.3f} m²/s**
-        """)
-        
-        use_auto_q = st.checkbox("✅ Use auto-calculated q values from Q", value=True)
-        
-        st.subheader("Cross-Section Analysis (Table 8 & 9)")
-        
-        # Upstream section
-        st.markdown("**Upstream Section**")
-        col1, col2 = st.columns(2)
-        with col1:
-            HFL_US = st.number_input("HFL US (m)", value=219.06, step=0.01)
-            if use_auto_q:
-                q_avg_US = st.number_input(
-                    "q avg US (m²/s)", 
-                    value=round(q_auto * 0.9, 2),
-                    step=0.01,
-                    key="q_avg_US"
-                )
+        # Auto-calculate discharge intensity
+        if hec_ras_data and hec_ras_data.get('q_avg'):
+            # Use HEC-RAS extracted values
+            q_avg_auto = hec_ras_data['q_avg']
+            q_max_auto = hec_ras_data['q_max']
+            HFL_auto = hec_ras_data['WSE']
+            
+            st.success(f"""
+            **✅ Auto-Calculated from HEC-RAS:**
+            - q_avg = Q_bridge / Top_Width = {hec_ras_data.get('Q_bridge', 0):.2f} / {hec_ras_data.get('top_width', 0):.2f} = **{q_avg_auto:.3f} m²/s**
+            - q_max = q_avg × 1.4 = **{q_max_auto:.3f} m²/s**
+            - HFL/WSE = **{HFL_auto:.2f} m**
+            """)
+            
+            # Show option to override
+            allow_override = st.checkbox("✏️ Allow manual override", value=False)
+            
+            if allow_override:
+                q_avg = st.number_input("Average Discharge Intensity q_avg (m²/s)", 
+                                       value=round(q_avg_auto, 3), step=0.001)
+                q_max = st.number_input("Maximum Discharge Intensity q_max (m²/s)", 
+                                       value=round(q_max_auto, 3), step=0.001)
+                HFL = st.number_input("Water Surface Elevation (HFL/WSE) (m)", 
+                                     value=round(HFL_auto, 2), step=0.01)
             else:
-                q_avg_US = st.number_input("q avg US (m²/s)", value=5.21, step=0.01, key="q_avg_US_manual")
-        with col2:
-            if use_auto_q:
-                q_max_US = st.number_input(
-                    "q max US (m²/s)", 
-                    value=round(q_auto * 1.3, 2),
-                    step=0.01,
-                    key="q_max_US"
-                )
+                q_avg = q_avg_auto
+                q_max = q_max_auto
+                HFL = HFL_auto
+                
+        elif st.session_state.results:
+            # Calculate from design discharge if no HEC-RAS data
+            Q_design_val = st.session_state.results.get('Design_Discharge', 0)
+            L_bridge_val = L_bridge
+            
+            # Estimate q from Q and bridge length
+            # q = Q / Width, assume Width ≈ 0.8 × L_bridge
+            estimated_width = L_bridge_val * 0.8
+            q_avg_auto = Q_design_val / estimated_width
+            q_max_auto = q_avg_auto * 1.4
+            
+            st.warning(f"""
+            **⚠️ No HEC-RAS data loaded. Auto-calculated from Q_design:**
+            - q_avg = Q_design / (0.8 × L_bridge) = {Q_design_val:.2f} / {estimated_width:.2f} = **{q_avg_auto:.3f} m²/s**
+            - q_max = q_avg × 1.4 = **{q_max_auto:.3f} m²/s**
+            
+            *Upload HEC-RAS output for more accurate values*
+            """)
+            
+            # Show option to override
+            allow_override = st.checkbox("✏️ Allow manual override", value=False)
+            
+            if allow_override:
+                q_avg = st.number_input("Average Discharge Intensity q_avg (m²/s)", 
+                                       value=round(q_avg_auto, 3), step=0.001)
+                q_max = st.number_input("Maximum Discharge Intensity q_max (m²/s)", 
+                                       value=round(q_max_auto, 3), step=0.001)
+                HFL = st.number_input("Water Surface Elevation (HFL/WSE) (m)", 
+                                     value=219.06, step=0.01)
             else:
-                q_max_US = st.number_input("q max US (m²/s)", value=7.7, step=0.01, key="q_max_US_manual")
-        
-        # Existing bridge section
-        st.markdown("**Existing Bridge Section**")
-        col1, col2 = st.columns(2)
-        with col1:
-            HFL_EX = st.number_input("HFL EX (m)", value=218.6, step=0.01)
-            if use_auto_q:
-                q_avg_EX = st.number_input(
-                    "q avg EX (m²/s)", 
-                    value=round(q_auto, 2),
-                    step=0.01,
-                    key="q_avg_EX"
-                )
-            else:
-                q_avg_EX = st.number_input("q avg EX (m²/s)", value=5.28, step=0.01, key="q_avg_EX_manual")
-        with col2:
-            if use_auto_q:
-                q_max_EX = st.number_input(
-                    "q max EX (m²/s)", 
-                    value=round(q_auto * 1.4, 2),
-                    step=0.01,
-                    key="q_max_EX"
-                )
-            else:
-                q_max_EX = st.number_input("q max EX (m²/s)", value=8.1, step=0.01, key="q_max_EX_manual")
+                q_avg = q_avg_auto
+                q_max = q_max_auto
+                HFL = 219.06  # Default HFL
+        else:
+            # Fallback to manual entry
+            st.error("⚠️ Please run discharge analysis in Tab 3 first!")
+            q_avg = st.number_input("Average Discharge Intensity q_avg (m²/s)", value=5.21, step=0.001)
+            q_max = st.number_input("Maximum Discharge Intensity q_max (m²/s)", value=7.70, step=0.001)
+            HFL = st.number_input("Water Surface Elevation (HFL/WSE) (m)", value=219.06, step=0.01)
         
         # Calculate scour
         if st.button("🔍 Calculate Scour Depths", type="primary"):
@@ -466,24 +560,19 @@ with tab5:
                     Blench_Fb=Blench_Fb
                 )
                 
-                # Upstream
-                scour_US = scour_calc.full_scour_analysis(HFL_US, q_avg_US, q_max_US)
-                
-                # Existing
-                scour_EX = scour_calc.full_scour_analysis(HFL_EX, q_avg_EX, q_max_EX)
+                # Calculate scour for single bridge section
+                scour_results = scour_calc.full_scour_analysis(HFL, q_avg, q_max)
                 
                 # Display Table 8
                 st.subheader("Mean Scour Calculation (Table 8)")
                 scour_table = pd.DataFrame({
-                    'Section': ['Upstream', 'Existing Bridge'],
-                    'D_lacey_avg': [scour_US['mean_scour']['D_lacey_avg'], 
-                                   scour_EX['mean_scour']['D_lacey_avg']],
-                    'D_lacey_max': [scour_US['mean_scour']['D_lacey_max'],
-                                   scour_EX['mean_scour']['D_lacey_max']],
-                    'D_blench': [scour_US['mean_scour']['D_blench'],
-                                scour_EX['mean_scour']['D_blench']],
-                    'D_adopted': [scour_US['mean_scour']['D_adopted'],
-                                 scour_EX['mean_scour']['D_adopted']]
+                    'Method': ["Lacey's (avg q)", "Lacey's (max q)", "Blench's", "Adopted"],
+                    'Scour Depth (m)': [
+                        scour_results['mean_scour']['D_lacey_avg'],
+                        scour_results['mean_scour']['D_lacey_max'],
+                        scour_results['mean_scour']['D_blench'],
+                        scour_results['mean_scour']['D_adopted']
+                    ]
                 })
                 st.dataframe(scour_table, width='stretch')
                 
@@ -492,82 +581,62 @@ with tab5:
                 table9_data = {
                     'Parameter': [
                         'Adopted Mean Scour D (m)',
-                        'Scour Depth Abutment (m)',
-                        'Scour Depth Pier (m)',
-                        'Scour Level Abutment (m)',
-                        'Scour Level Pier (m)',
-                        'Min Soffit Level (m)'
+                        'Scour Depth - Abutment (m)',
+                        'Scour Depth - Pier (m)',
+                        'Scour Level - Abutment (m)',
+                        'Scour Level - Pier (m)',
+                        'Minimum Soffit Level (m)',
+                        'Water Surface Elevation (HFL/WSE) (m)'
                     ],
-                    'Upstream': [
-                        scour_US['mean_scour']['D_adopted'],
-                        scour_US['pier_abutment_scour']['D_abutment'],
-                        scour_US['pier_abutment_scour']['D_pier'],
-                        scour_US['scour_levels']['scour_level_abutment'],
-                        scour_US['scour_levels']['scour_level_pier'],
-                        scour_US['min_soffit_level']
-                    ],
-                    'Existing': [
-                        scour_EX['mean_scour']['D_adopted'],
-                        scour_EX['pier_abutment_scour']['D_abutment'],
-                        scour_EX['pier_abutment_scour']['D_pier'],
-                        scour_EX['scour_levels']['scour_level_abutment'],
-                        scour_EX['scour_levels']['scour_level_pier'],
-                        scour_EX['min_soffit_level']
+                    'Value': [
+                        scour_results['mean_scour']['D_adopted'],
+                        scour_results['pier_abutment_scour']['D_abutment'],
+                        scour_results['pier_abutment_scour']['D_pier'],
+                        scour_results['scour_levels']['scour_level_abutment'],
+                        scour_results['scour_levels']['scour_level_pier'],
+                        scour_results['min_soffit_level'],
+                        HFL
                     ]
                 }
                 table9_df = pd.DataFrame(table9_data)
                 st.dataframe(table9_df, width='stretch')
                 
-                # ✅ SAVE TO SESSION STATE FOR REPORT GENERATION
+                # Save to session state for report
                 st.session_state.scour_results = {
                     'parameters': {
                         'Q_design': Q_design,
                         'Q100': Q100,
-                        'Q_scour_used': Q_design,
                         'L_bridge': L_bridge,
                         'dmean_mm': dmean_mm,
                         'Ksf': Ksf,
-                        'Blench_Fb': Blench_Fb
+                        'Blench_Fb': Blench_Fb,
+                        'q_avg': q_avg,
+                        'q_max': q_max,
+                        'HFL': HFL
                     },
-                    'upstream': {
+                    'bridge_section': {
                         'mean_scour': {
-                            'D_lacey_avg': scour_US['mean_scour']['D_lacey_avg'],
-                            'D_lacey_max': scour_US['mean_scour']['D_lacey_max'],
-                            'D_blench': scour_US['mean_scour']['D_blench'],
-                            'D_adopted': scour_US['mean_scour']['D_adopted']
+                            'D_lacey_avg': scour_results['mean_scour']['D_lacey_avg'],
+                            'D_lacey_max': scour_results['mean_scour']['D_lacey_max'],
+                            'D_blench': scour_results['mean_scour']['D_blench'],
+                            'D_adopted': scour_results['mean_scour']['D_adopted']
                         },
                         'pier_abutment_scour': {
-                            'D_abutment': scour_US['pier_abutment_scour']['D_abutment'],
-                            'D_pier': scour_US['pier_abutment_scour']['D_pier']
+                            'D_abutment': scour_results['pier_abutment_scour']['D_abutment'],
+                            'D_pier': scour_results['pier_abutment_scour']['D_pier']
                         },
                         'scour_levels': {
-                            'scour_level_abutment': scour_US['scour_levels']['scour_level_abutment'],
-                            'scour_level_pier': scour_US['scour_levels']['scour_level_pier']
+                            'scour_level_abutment': scour_results['scour_levels']['scour_level_abutment'],
+                            'scour_level_pier': scour_results['scour_levels']['scour_level_pier']
                         },
-                        'min_soffit_level': scour_US['min_soffit_level'],
-                        'HFL': HFL_US
-                    },
-                    'existing': {
-                        'mean_scour': {
-                            'D_lacey_avg': scour_EX['mean_scour']['D_lacey_avg'],
-                            'D_lacey_max': scour_EX['mean_scour']['D_lacey_max'],
-                            'D_blench': scour_EX['mean_scour']['D_blench'],
-                            'D_adopted': scour_EX['mean_scour']['D_adopted']
-                        },
-                        'pier_abutment_scour': {
-                            'D_abutment': scour_EX['pier_abutment_scour']['D_abutment'],
-                            'D_pier': scour_EX['pier_abutment_scour']['D_pier']
-                        },
-                        'scour_levels': {
-                            'scour_level_abutment': scour_EX['scour_levels']['scour_level_abutment'],
-                            'scour_level_pier': scour_EX['scour_levels']['scour_level_pier']
-                        },
-                        'min_soffit_level': scour_EX['min_soffit_level'],
-                        'HFL': HFL_EX
+                        'min_soffit_level': scour_results['min_soffit_level'],
+                        'HFL': HFL,
+                        'q_avg': q_avg,
+                        'q_max': q_max
                     }
                 }
                 
-                st.success(f"✅ Scour calculation completed using Q = {Q_design:.2f} m³/s!")
+                st.success(f"✅ Scour calculation completed!")
                 
             except Exception as e:
                 st.error(f"❌ Scour calculation error: {e}")
@@ -587,7 +656,7 @@ with tab6:
         st.subheader("Download Options")
         
         # Option 1: HEC-RAS JSON
-        hec_ras_data = {
+        hec_ras_input_data = {
             'project_info': {
                 'bridge_name': catchment.get('bridge_name', 'Bridge'),
                 'chainage': catchment.get('chainage', ''),
@@ -609,7 +678,7 @@ with tab6:
             }
         }
         
-        json_data = json.dumps(hec_ras_data, indent=2)
+        json_data = json.dumps(hec_ras_input_data, indent=2)
         st.download_button(
             label="📥 Download HEC-RAS Input (JSON)",
             data=json_data,
@@ -623,27 +692,11 @@ with tab6:
         
         if st.button("📊 Generate Complete Report (MS Word)", type="primary"):
             try:
-                from src.report_generator import HydrologyReportGenerator
-                
                 # Prepare rainfall data
-                rainfall_stats = {}
-                if 'rainfall_df' in st.session_state:
-                    df = st.session_state.rainfall_df
-                    rainfall_col = df.columns[1] if len(df.columns) > 1 else df.columns[0]
-                    rainfall_data = df[rainfall_col].values
-                    
-                    rainfall_stats = {
-                        'n_years': len(rainfall_data),
-                        'mean': float(np.mean(rainfall_data)),
-                        'max': float(np.max(rainfall_data)),
-                        'min': float(np.min(rainfall_data)),
-                        'std': float(np.std(rainfall_data))
-                    }
+                rainfall_stats = st.session_state.get('rainfall_stats', {})
                 
                 # Prepare scour data
-                scour_data = {}
-                if hasattr(st.session_state, 'scour_results'):
-                    scour_data = st.session_state.scour_results
+                scour_data = st.session_state.get('scour_results', {})
                 
                 # Generate report
                 report_gen = HydrologyReportGenerator(
@@ -685,7 +738,7 @@ with tab6:
         - ✅ Executive Summary
         - ✅ Catchment Characteristics (Table 1)
         - ✅ Rainfall Statistics & Frequency Analysis
-        - ✅ Goodness-of-Fit Test Results
+        - ✅ Goodness-of-Fit Test Results (KS, Chi-Square, AD)
         - ✅ Return Period Rainfall (2, 5, 10, 20, 50, 100, 200 years)
         - ✅ Discharge Analysis (All 4 Methods - Table 5)
         - ✅ Scour Calculations (Tables 7, 8, 9)
@@ -695,3 +748,7 @@ with tab6:
         
     else:
         st.warning("⚠️ Please run discharge analysis first (Tab 3)")
+
+# Footer
+st.markdown("---")
+st.markdown("🌉 Bridge Hydrology Agent v1.0 | Based on DoR Nepal Guidelines ")
