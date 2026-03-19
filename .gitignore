@@ -205,3 +205,27 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+# ============================================
+# Bridge Hydrology Agent - Project Specific
+# ============================================
+
+# Generated reports
+*.docx
+*.xlsx
+*.pdf
+
+# IDF curve plots (generated)
+data/rainfall/*.png
+data/rainfall/*.jpg
+data/rainfall/idf_curve.*
+
+# Temporary analysis files
+data/rainfall/temp_*.csv
+data/rainfall/test_*.csv
+
+# Streamlit cache
+.streamlit/
+
+# Local config (optional)
+config.local.py
+.env.local
