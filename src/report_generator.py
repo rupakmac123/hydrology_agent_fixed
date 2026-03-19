@@ -1,19 +1,36 @@
 """
 Comprehensive Report Generator for Bridge Hydrology Agent
 Generates professional MS Word reports matching DoR Nepal standards
+Includes IDF curve integration with plot and table
 """
 
 from docx import Document
-from docx.shared import Pt
+from docx.shared import Pt, Inches
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from datetime import datetime
+import pandas as pd
+import os
+from pathlib import Path
 
 
 class HydrologyReportGenerator:
+    """
+    Generate comprehensive hydrology reports in MS Word format
+    """
     
     def __init__(self, catchment_data: dict, rainfall_data: dict, 
                  discharge_data: dict, scour_data: dict,
                  rainfall_analysis: dict = None):
+        """
+        Initialize report generator
+        
+        Args:
+            catchment_data: Catchment characteristics
+            rainfall_data: Rainfall statistics
+            discharge_data: Peak discharge results
+            scour_data: Scour calculation results
+            rainfall_analysis: Full rainfall analysis including IDF
+        """
         self.catchment = catchment_data
         self.rainfall = rainfall_data
         self.discharge = discharge_data
@@ -22,6 +39,7 @@ class HydrologyReportGenerator:
         self.doc = Document()
     
     def _add_title_page(self):
+        """Add title page to report"""
         title = self.doc.add_heading('BRIDGE HYDROLOGY REPORT', 0)
         title.alignment = WD_ALIGN_PARAGRAPH.CENTER
         
@@ -57,6 +75,7 @@ class HydrologyReportGenerator:
         self.doc.add_page_break()
     
     def _add_catchment_characteristics(self):
+        """Add catchment characteristics section"""
         self.doc.add_heading('1. CATCHMENT CHARACTERISTICS', level=1)
         
         table = self.doc.add_table(rows=8, cols=2)
@@ -84,6 +103,7 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def _add_rainfall_analysis(self):
+        """Add rainfall frequency analysis section"""
         self.doc.add_heading('2. RAINFALL FREQUENCY ANALYSIS', level=1)
         
         self.doc.add_heading('2.1 Rainfall Statistics', level=2)
@@ -162,7 +182,139 @@ class HydrologyReportGenerator:
         
         self.doc.add_paragraph()
     
+    def _add_idf_analysis(self):
+        """Add IDF analysis section with robust image handling"""
+        self.doc.add_heading('2.4 IDF (Intensity-Duration-Frequency) Analysis', level=2)
+        
+        # Add IDF plot if available
+        idf_plot_path = self.rainfall_analysis.get('idf_plot_path')
+        
+        print(f"\n=== IDF Plot Debug ===")
+        print(f"Plot path: {idf_plot_path}")
+        print(f"Plot path type: {type(idf_plot_path)}")
+        
+        if idf_plot_path:
+            # Convert to string if it's a Path object
+            idf_plot_path = str(idf_plot_path)
+            
+            print(f"File exists: {os.path.exists(idf_plot_path)}")
+            print(f"File size: {os.path.getsize(idf_plot_path) if os.path.exists(idf_plot_path) else 0} bytes")
+            print(f"Current directory: {os.getcwd()}")
+            
+            if os.path.exists(idf_plot_path):
+                try:
+                    # Add the picture with error handling
+                    self.doc.add_picture(idf_plot_path, width=Inches(6.0))
+                    self.doc.add_paragraph()
+                    print(f"✅ IDF plot added to document")
+                    
+                    # Add caption - FIXED: Pass text directly to add_paragraph()
+                    caption = self.doc.add_paragraph("Figure 2.1: IDF (Intensity-Duration-Frequency) Curves")
+                    caption.style = 'Caption'
+                    print(f"✅ Caption added")
+                    
+                except Exception as e:
+                    print(f"❌ Error adding picture: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    
+                    # Add placeholder text
+                    placeholder = self.doc.add_paragraph()
+                    placeholder.add_run(f"[IDF Plot: {idf_plot_path}]").italic = True
+            else:
+                print(f"⚠️ Plot file not found at: {idf_plot_path}")
+                
+                # Try alternative paths
+                alt_paths = [
+                    os.path.basename(idf_plot_path),  # Just filename
+                    f'data/rainfall/idf_curve.png',
+                    f'./data/rainfall/idf_curve.png',
+                    idf_plot_path.replace('.jpg', '.png'),  # Try PNG if JPG failed
+                ]
+                
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        try:
+                            self.doc.add_picture(alt_path, width=Inches(6.0))
+                            self.doc.add_paragraph()
+                            print(f"✅ IDF plot added using alternative path: {alt_path}")
+                            break
+                        except Exception as e:
+                            print(f"❌ Alternative path failed: {alt_path} - {e}")
+                else:
+                    # No alternative worked
+                    placeholder = self.doc.add_paragraph()
+                    placeholder.add_run("[IDF Plot not available - file not found]").italic = True
+        else:
+            print("⚠️ No IDF plot path found")
+            placeholder = self.doc.add_paragraph()
+            placeholder.add_run("[IDF Plot not generated]").italic = True
+        
+        # Add IDF table
+        if self.rainfall_analysis.get('idf_data'):
+            self.doc.add_heading('2.4.1 Rainfall Intensity (mm/hr)', level=3)
+            
+            idf_data = self.rainfall_analysis['idf_data']
+            
+            try:
+                # Get unique durations and return periods
+                duration_labels = idf_data.get('Duration_Label', {})
+                return_periods_data = idf_data.get('Return_Period', {})
+                intensity_data = idf_data.get('Intensity_mm_hr', {})
+                
+                # Get unique values
+                if duration_labels:
+                    durations = sorted(set(duration_labels.values()), 
+                                      key=lambda x: ['15 min', '30 min', '1 hr', '2 hr', '6 hr', '12 hr', '24 hr'].index(x) if x in ['15 min', '30 min', '1 hr', '2 hr', '6 hr', '12 hr', '24 hr'] else 99)
+                else:
+                    durations = ['15 min', '30 min', '1 hr', '2 hr', '6 hr', '12 hr', '24 hr']
+                
+                if return_periods_data:
+                    return_periods = sorted(set(return_periods_data.values()))
+                else:
+                    return_periods = [2, 5, 10, 50, 100, 200]
+                
+                # Create table
+                table = self.doc.add_table(rows=len(durations) + 1, cols=len(return_periods) + 1)
+                table.style = 'Light Grid Accent 1'
+                
+                # Header row
+                hdr_cells = table.rows[0].cells
+                hdr_cells[0].text = 'Duration'
+                for j, rp in enumerate(return_periods):
+                    hdr_cells[j + 1].text = f'{rp}-year'
+                
+                # Data rows
+                for i, duration in enumerate(durations):
+                    row_cells = table.rows[i + 1].cells
+                    row_cells[0].text = str(duration)
+                    
+                    for j, rp in enumerate(return_periods):
+                        try:
+                            intensity_value = 0.0
+                            for idx in range(len(duration_labels)):
+                                if duration_labels.get(idx, '') == duration and return_periods_data.get(idx, 0) == rp:
+                                    intensity_value = intensity_data.get(idx, 0.0)
+                                    break
+                            
+                            row_cells[j + 1].text = f"{float(intensity_value):.2f}"
+                            
+                        except (KeyError, TypeError, ValueError) as e:
+                            row_cells[j + 1].text = "0.00"
+                
+                print(f"✅ IDF table added successfully")
+                
+            except Exception as e:
+                print(f"❌ Error creating IDF table: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        print(f"=== End IDF Analysis ===\n")
+        
+        self.doc.add_paragraph()
+    
     def _add_discharge_analysis(self):
+        """Add peak discharge analysis section"""
         self.doc.add_heading('3. PEAK DISCHARGE ANALYSIS', level=1)
         
         table = self.doc.add_table(rows=1, cols=2)
@@ -201,6 +353,7 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def _add_scour_calculation(self):
+        """Add scour calculation section"""
         self.doc.add_heading('4. SCOUR DEPTH CALCULATION', level=1)
         
         if not self.scour:
@@ -211,7 +364,7 @@ class HydrologyReportGenerator:
         
         if self.scour.get('parameters'):
             params = self.scour['parameters']
-            table = self.doc.add_table(rows=9, cols=2)
+            table = self.doc.add_table(rows=10, cols=2)
             table.style = 'Light Grid Accent 1'
             
             param_data = [
@@ -284,11 +437,28 @@ class HydrologyReportGenerator:
         self.doc.add_paragraph()
     
     def generate_report(self, output_path: str) -> str:
+        """
+        Generate complete hydrology report
+        
+        Args:
+            output_path: Path to save the report
+            
+        Returns:
+            Path to saved report
+        """
+        print("\n=== Generating Report ===")
+        print(f"Output path: {output_path}")
+        print(f"rainfall_analysis keys: {list(self.rainfall_analysis.keys())}")
+        print(f"idf_plot_path in rainfall_analysis: {self.rainfall_analysis.get('idf_plot_path')}")
+        
         self._add_title_page()
         self._add_catchment_characteristics()
         self._add_rainfall_analysis()
+        self._add_idf_analysis()
         self._add_discharge_analysis()
         self._add_scour_calculation()
         
         self.doc.save(output_path)
+        print(f"✅ Report saved to: {output_path}")
+        print(f"=== Report Generation Complete ===\n")
         return output_path

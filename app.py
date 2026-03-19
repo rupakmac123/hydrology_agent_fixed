@@ -1,6 +1,7 @@
 """
 Bridge Hydrology Agent - Streamlit Web Interface
 Based on Department of Roads (DoR) Nepal Guidelines - Ratu Bridge Report
+Includes IDF Curve Generation and Display
 """
 
 import streamlit as st
@@ -14,6 +15,9 @@ import os
 import re
 import io
 import tempfile
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -215,6 +219,30 @@ with tab2:
                 with col3:
                     st.warning(f"Data Years: {len(st.session_state.rainfall_df)}")
                 
+                # DEBUG: Check IDF data
+                st.write("### IDF Debug Info")
+                st.write(f"**IDF Plot Path:** {analysis_results.get('idf_plot_path')}")
+                st.write(f"**IDF Table Exists:** {bool(analysis_results.get('idf_table'))}")
+                st.write(f"**IDF Data Exists:** {bool(analysis_results.get('idf_data'))}")
+                
+                # Check if file exists and show it
+                if analysis_results.get('idf_plot_path'):
+                    if os.path.exists(analysis_results['idf_plot_path']):
+                        file_size = os.path.getsize(analysis_results['idf_plot_path'])
+                        st.success(f"✅ IDF plot file exists! (Size: {file_size:,} bytes)")
+                        
+                        # Show plot preview
+                        st.image(analysis_results['idf_plot_path'], 
+                                caption="IDF Curve Preview - Verify this looks correct", 
+                                width=600)
+                        
+                        if file_size < 1000:
+                            st.error(f"⚠️ Warning: File is very small ({file_size} bytes). Plot might be corrupted.")
+                    else:
+                        st.error("❌ IDF plot file NOT found!")
+                        st.write(f"Expected path: {analysis_results['idf_plot_path']}")
+                        st.write(f"Current working directory: {os.getcwd()}")
+                
             except Exception as e:
                 st.error(f"Analysis error: {e}")
                 st.session_state.rainfall_results = {'R100yr': 519.38}
@@ -224,6 +252,40 @@ with tab2:
         if st.session_state.rainfall_results is None:
             st.session_state.rainfall_results = {'R100yr': 519.38, 'best_distribution': 'Laplace (Report)'}
             st.info("Using Ratu Report R100yr value: 519.38 mm")
+    
+    # Display IDF Curves
+    if st.session_state.rainfall_results and st.session_state.rainfall_results.get('idf_plot_path'):
+        st.markdown("---")
+        st.subheader("📊 IDF (Intensity-Duration-Frequency) Curves")
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            # Display IDF plot
+            if os.path.exists(st.session_state.rainfall_results['idf_plot_path']):
+                st.image(st.session_state.rainfall_results['idf_plot_path'], 
+                        caption="IDF Curves", width=600)
+            else:
+                st.warning("IDF plot file not found")
+        
+        with col2:
+            # Show IDF table
+            st.markdown("#### Rainfall Intensity (mm/hr)")
+            if st.session_state.rainfall_results.get('idf_table'):
+                idf_table = pd.DataFrame(st.session_state.rainfall_results['idf_table'])
+                st.dataframe(idf_table, width=300)
+        
+        # Download IDF data
+        if st.session_state.rainfall_results.get('idf_data'):
+            idf_data = pd.DataFrame(st.session_state.rainfall_results['idf_data'])
+            csv_data = idf_data.to_csv(index=False)
+            st.download_button(
+                label="📥 Download IDF Data (CSV)",
+                data=csv_data,
+                file_name=f"idf_data_{st.session_state.catchment_props.get('bridge_name', 'bridge')}.csv",
+                mime="text/csv",
+                key="download_idf"
+            )
 
 # ============== TAB 3: Analysis Results ==============
 with tab3:
@@ -366,9 +428,6 @@ with tab5:
         
         hec_ras_data = None
         
-        # ─────────────────────────────────────────────────────────────
-        # Method 1: Upload HEC-RAS Output File
-        # ─────────────────────────────────────────────────────────────
         if upload_method == "📤 Upload HEC-RAS Output File":
             hec_ras_file = st.file_uploader(
                 "Upload HEC-RAS Output (.hdf, .out, .O01, .csv, .txt)",
@@ -377,11 +436,9 @@ with tab5:
             )
             
             if hec_ras_file:
-                # Check file type
                 filename = hec_ras_file.name.lower()
                 
                 if filename.endswith('.hdf'):
-                    # HDF5 file - save temporarily and parse
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.hdf') as tmp:
                         tmp.write(hec_ras_file.read())
                         tmp_path = tmp.name
@@ -389,11 +446,9 @@ with tab5:
                     with st.spinner("🔍 Parsing HDF5 file..."):
                         hec_ras_data = parse_hec_ras_hdf_file(tmp_path)
                     
-                    # Clean up temp file
                     os.unlink(tmp_path)
                     
                 else:
-                    # Text or CSV file - use existing parser
                     with st.spinner("🔍 Parsing output file..."):
                         hec_ras_data = parse_hec_ras_file(hec_ras_file)
                 
@@ -403,9 +458,6 @@ with tab5:
                 else:
                     st.error("❌ Could not parse HEC-RAS file. Please check file format.")
         
-        # ─────────────────────────────────────────────────────────────
-        # Method 2: Link to HEC-RAS Project Folder
-        # ─────────────────────────────────────────────────────────────
         else:
             project_folder = st.text_input(
                 "HEC-RAS Project Folder Path:",
@@ -427,7 +479,6 @@ with tab5:
                 else:
                     st.error("❌ Folder path does not exist")
         
-        # Display extracted HEC-RAS data
         if hec_ras_data:
             st.info(f"""
             **✅ Extracted from HEC-RAS:**
@@ -441,7 +492,6 @@ with tab5:
         
         st.subheader("Basic Parameters (Table 7)")
         
-        # Auto-calculate Q_scour from Q100
         Q100 = st.session_state.results.get('Adopted_Q100', 0)
         Q_scour_auto = Q100 * 1.30
         
@@ -454,7 +504,6 @@ with tab5:
             - Q_scour (×1.30): {Q_scour_auto:.2f} m³/s
             """)
             
-            # Use HEC-RAS Q if available, otherwise use calculated
             default_Q = hec_ras_data.get('Q_bridge', Q_scour_auto) if hec_ras_data else Q_scour_auto
             
             Q_design = st.number_input(
@@ -474,15 +523,10 @@ with tab5:
             Blench_Fb = st.number_input("Blench Fb", value=0.8, step=0.1)
             freeboard = st.number_input("Freeboard (m)", value=1.5, step=0.1)
         
-        # ═══════════════════════════════════════════════════════════════
-        # Discharge Intensity - AUTO-CALCULATED (NOT MANUAL)
-        # ═══════════════════════════════════════════════════════════════
         st.markdown("---")
         st.subheader("📊 Discharge Intensity (Auto-Calculated)")
         
-        # Auto-calculate discharge intensity
         if hec_ras_data and hec_ras_data.get('q_avg'):
-            # Use HEC-RAS extracted values
             q_avg_auto = hec_ras_data['q_avg']
             q_max_auto = hec_ras_data['q_max']
             HFL_auto = hec_ras_data['WSE']
@@ -494,7 +538,6 @@ with tab5:
             - HFL/WSE = **{HFL_auto:.2f} m**
             """)
             
-            # Show option to override
             allow_override = st.checkbox("✏️ Allow manual override", value=False)
             
             if allow_override:
@@ -510,12 +553,9 @@ with tab5:
                 HFL = HFL_auto
                 
         elif st.session_state.results:
-            # Calculate from design discharge if no HEC-RAS data
             Q_design_val = st.session_state.results.get('Design_Discharge', 0)
             L_bridge_val = L_bridge
             
-            # Estimate q from Q and bridge length
-            # q = Q / Width, assume Width ≈ 0.8 × L_bridge
             estimated_width = L_bridge_val * 0.8
             q_avg_auto = Q_design_val / estimated_width
             q_max_auto = q_avg_auto * 1.4
@@ -528,7 +568,6 @@ with tab5:
             *Upload HEC-RAS output for more accurate values*
             """)
             
-            # Show option to override
             allow_override = st.checkbox("✏️ Allow manual override", value=False)
             
             if allow_override:
@@ -541,15 +580,13 @@ with tab5:
             else:
                 q_avg = q_avg_auto
                 q_max = q_max_auto
-                HFL = 219.06  # Default HFL
+                HFL = 219.06
         else:
-            # Fallback to manual entry
             st.error("⚠️ Please run discharge analysis in Tab 3 first!")
             q_avg = st.number_input("Average Discharge Intensity q_avg (m²/s)", value=5.21, step=0.001)
             q_max = st.number_input("Maximum Discharge Intensity q_max (m²/s)", value=7.70, step=0.001)
             HFL = st.number_input("Water Surface Elevation (HFL/WSE) (m)", value=219.06, step=0.01)
         
-        # Calculate scour
         if st.button("🔍 Calculate Scour Depths", type="primary"):
             try:
                 scour_calc = ScourCalculator(
@@ -560,10 +597,8 @@ with tab5:
                     Blench_Fb=Blench_Fb
                 )
                 
-                # Calculate scour for single bridge section
                 scour_results = scour_calc.full_scour_analysis(HFL, q_avg, q_max)
                 
-                # Display Table 8
                 st.subheader("Mean Scour Calculation (Table 8)")
                 scour_table = pd.DataFrame({
                     'Method': ["Lacey's (avg q)", "Lacey's (max q)", "Blench's", "Adopted"],
@@ -576,7 +611,6 @@ with tab5:
                 })
                 st.dataframe(scour_table, width='stretch')
                 
-                # Display Table 9
                 st.subheader("Scour Depth and Level Calculation (Table 9)")
                 table9_data = {
                     'Parameter': [
@@ -601,7 +635,6 @@ with tab5:
                 table9_df = pd.DataFrame(table9_data)
                 st.dataframe(table9_df, width='stretch')
                 
-                # Save to session state for report
                 st.session_state.scour_results = {
                     'parameters': {
                         'Q_design': Q_design,
@@ -655,7 +688,6 @@ with tab6:
         
         st.subheader("Download Options")
         
-        # Option 1: HEC-RAS JSON
         hec_ras_input_data = {
             'project_info': {
                 'bridge_name': catchment.get('bridge_name', 'Bridge'),
@@ -686,19 +718,31 @@ with tab6:
             mime="application/json"
         )
         
-        # Option 2: Complete Hydrology Report (DOCX)
         st.markdown("---")
         st.subheader("📄 Complete Hydrology Report")
         
         if st.button("📊 Generate Complete Report (MS Word)", type="primary"):
             try:
-                # Prepare rainfall data
                 rainfall_stats = st.session_state.get('rainfall_stats', {})
-                
-                # Prepare scour data
                 scour_data = st.session_state.get('scour_results', {})
                 
-                # Generate report
+                # Debug: Check rainfall_results before generating report
+                print(f"\n=== Before Report Generation ===")
+                print(f"rainfall_results keys: {list(st.session_state.rainfall_results.keys()) if st.session_state.rainfall_results else 'None'}")
+                print(f"idf_plot_path: {st.session_state.rainfall_results.get('idf_plot_path') if st.session_state.rainfall_results else 'None'}")
+                
+                # Verify IDF plot file exists and get absolute path
+                if st.session_state.rainfall_results and st.session_state.rainfall_results.get('idf_plot_path'):
+                    idf_path = Path(st.session_state.rainfall_results['idf_plot_path']).resolve()
+                    st.session_state.rainfall_results['idf_plot_path'] = str(idf_path)  # Update with absolute path
+    
+                    if os.path.exists(idf_path):
+                        file_size = os.path.getsize(idf_path)
+                        print(f"✅ IDF plot file exists: {idf_path} ({file_size} bytes)")
+                    else:
+                        print(f"❌ IDF plot file NOT found at: {idf_path}")
+                        st.warning(f"IDF plot file not found. Report will be generated without the plot.")
+                
                 report_gen = HydrologyReportGenerator(
                     catchment_data=catchment,
                     rainfall_data=rainfall_stats,
@@ -707,11 +751,9 @@ with tab6:
                     rainfall_analysis=st.session_state.get('rainfall_results', {})
                 )
                 
-                # Save to temporary file
                 report_path = f"hydrology_report_{catchment.get('bridge_name', 'bridge')}.docx"
                 report_gen.generate_report(report_path)
                 
-                # Read file for download
                 with open(report_path, 'rb') as f:
                     report_bytes = f.read()
                 
@@ -732,7 +774,6 @@ with tab6:
         st.markdown("---")
         st.success(f"**Upstream Boundary Condition for HEC-RAS: {results.get('Design_Discharge', 0):.2f} m³/s**")
         
-        # Additional info
         st.info("""
         **Report Includes:**
         - ✅ Executive Summary
@@ -740,6 +781,7 @@ with tab6:
         - ✅ Rainfall Statistics & Frequency Analysis
         - ✅ Goodness-of-Fit Test Results (KS, Chi-Square, AD)
         - ✅ Return Period Rainfall (2, 5, 10, 20, 50, 100, 200 years)
+        - ✅ **IDF Curves with Plot and Table**
         - ✅ Discharge Analysis (All 4 Methods - Table 5)
         - ✅ Scour Calculations (Tables 7, 8, 9)
         - ✅ Conclusions & Recommendations
@@ -751,4 +793,4 @@ with tab6:
 
 # Footer
 st.markdown("---")
-st.markdown("🌉 Bridge Hydrology Agent v1.0 | Based on DoR Nepal Guidelines ")
+st.markdown("🌉 Bridge Hydrology Agent v1.0 | Based on DoR Nepal Guidelines | Ratu Bridge Hydrology Report")
