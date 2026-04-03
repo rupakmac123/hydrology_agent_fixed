@@ -1,427 +1,253 @@
 """
 HEC-RAS Output Parser Module
-Auto-extracts data from HEC-RAS project files
-Handles HDF5 (.hdf), text (.txt, .out, .O01), and CSV formats
-Optimized for ratu.txt Bridge Output table format
+Parses HEC-RAS output files (.txt) for bridge hydraulic analysis
+Handles two-column tab-separated format from Aurahi/Ratu HEC-RAS output
 """
 
-import os
-import re
-from pathlib import Path
-from typing import Dict, Optional, List
-import pandas as pd
-import io
+from typing import Dict, Optional
 
 
-def parse_hec_ras_file(uploaded_file) -> Optional[Dict]:
+def parse_hec_ras_file(file) -> Dict:
     """
-    Parse uploaded HEC-RAS output file (Bridge Output Table)
-    Handles the specific ratu.txt format with tab-separated columns
+    Parse HEC-RAS output file (.txt format)
+    Handles two-column tab-separated format
+    
+    LEFT COLUMN: Global Parameter | Value
+    RIGHT COLUMN: Bridge Element | Inside BR US | Inside BR DS
     """
     try:
-        file_content = uploaded_file.read()
-        filename = uploaded_file.name.lower()
-        
-        print(f"DEBUG: Parsing file: {filename}")
-        print(f"DEBUG: File size: {len(file_content)} bytes")
-        
-        hec_ras_data = {
-            'WSE': None,
-            'Q_total': None,
-            'Q_bridge': None,
-            'velocity_avg': None,
-            'velocity_max': None,
-            'flow_area': None,
-            'top_width': None,
-            'q_avg': None,
-            'q_max': None,
-            'hydraulic_depth': None,
-            'EG_US': None,
-            'WS_BR_US': None,
-            'WS_BR_DS': None,
-            'EG_BR_US': None,
-            'EG_BR_DS': None,
-            'Crit_WS_US': None,
-            'Crit_WS_DS': None,
-            'Max_Chl_Dpth_US': None,
-            'Max_Chl_Dpth_DS': None,
-            'Vel_BR_DS': None,
-            'Flow_Area_BR_DS': None,
-            'Froude_US': None,
-            'Froude_DS': None,
-            'Specif_Force_US': None,
-            'Specif_Force_DS': None,
-            'Hydr_Dpth_DS': None,
-            'WP_Total_US': None,
-            'WP_Total_DS': None,
-            'Conv_Total_US': None,
-            'Conv_Total_DS': None,
-            'Shear_Total_US': None,
-            'Shear_Total_DS': None,
-            'Power_Total_US': None,
-            'Power_Total_DS': None,
-            'Delta_EG': None,
-            'Delta_WS': None,
-            'Frctn_Loss': None,
-            'CE_Loss': None,
-            'bridge_rs': '-524',
-            'us_xs': '-500',
-            'ds_xs': '-525',
-            'L_bridge': 226.17
-        }
-        
-        text_content = file_content.decode('utf-8', errors='ignore')
-        print("DEBUG: === PARSING HEC-RAS TEXT OUTPUT ===")
-        
-        lines = text_content.split('\n')
-        print(f"DEBUG: Total lines: {len(lines)}")
-        
-        for line_num, line in enumerate(lines):
+        # Read file content
+        if hasattr(file, 'read'):
+            content = file.read()
+            if isinstance(content, bytes):
+                content = content.decode('utf-8')
+        else:
+            content = str(file)
+
+        lines = content.split('\n')
+        data = {}
+
+        print(f"DEBUG: Parsing HEC-RAS file with {len(lines)} lines")
+
+        # Parse each line - handle BOTH left and right columns
+        for i, line in enumerate(lines):
             if not line.strip():
                 continue
-            
-            line_upper = line.upper()
-            all_numbers = re.findall(r'\d+\.\d+', line)
-            
-            # LEFT COLUMN PARAMETERS - Use INDEPENDENT if statements (NOT elif)
-            
-            # W.S. US. (m) - CRITICAL! Check this FIRST for WSE
-            # FIX: Removed 'ELEV' not in line_upper condition
-            if 'W.S. US' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 1:
-                    hec_ras_data['WSE'] = float(all_numbers[0])
-                    print(f"DEBUG Line {line_num}: Found W.S. US = {hec_ras_data['WSE']}")
-            
-            # E.G. US. (m)
-            if 'E.G. US' in line_upper and '(M)' in line_upper and 'ELEV' not in line_upper:
-                if len(all_numbers) >= 1:
-                    hec_ras_data['EG_US'] = float(all_numbers[0])
-                    print(f"DEBUG Line {line_num}: Found E.G. US = {hec_ras_data['EG_US']}")
-            
-            # Q Total (m3/s)
-            if 'Q TOTAL' in line_upper and '(M3/S)' in line_upper:
-                if len(all_numbers) >= 1:
-                    hec_ras_data['Q_total'] = float(all_numbers[0])
-                    hec_ras_data['Q_bridge'] = float(all_numbers[0])
-                    print(f"DEBUG Line {line_num}: Found Q Total = {hec_ras_data['Q_total']}")
-            
-            # Q Bridge (m3/s)
-            if 'Q BRIDGE' in line_upper and '(M3/S)' in line_upper:
-                if len(all_numbers) >= 1:
-                    hec_ras_data['Q_bridge'] = float(all_numbers[0])
-                    print(f"DEBUG Line {line_num}: Found Q Bridge = {hec_ras_data['Q_bridge']}")
-            
-            # Delta EG (m)
-            if 'DELTA EG' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 1:
-                    hec_ras_data['Delta_EG'] = float(all_numbers[0])
-                    print(f"DEBUG Line {line_num}: Found Delta EG = {hec_ras_data['Delta_EG']}")
-            
-            # Delta WS (m)
-            if 'DELTA WS' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 1:
-                    hec_ras_data['Delta_WS'] = float(all_numbers[0])
-                    print(f"DEBUG Line {line_num}: Found Delta WS = {hec_ras_data['Delta_WS']}")
-            
-            # Frctn Loss (m)
-            if 'FRCTN LOSS' in line_upper and '(M)' in line_upper:
-                for num in reversed(all_numbers):
-                    val = float(num)
-                    if val < 1.0:
-                        hec_ras_data['Frctn_Loss'] = val
-                        print(f"DEBUG Line {line_num}: Found Friction Loss = {hec_ras_data['Frctn_Loss']}")
-                        break
-            
-            # C & E Loss (m)
-            if 'C & E LOSS' in line_upper and '(M)' in line_upper:
-                for num in reversed(all_numbers):
-                    val = float(num)
-                    if val < 1.0:
-                        hec_ras_data['CE_Loss'] = val
-                        print(f"DEBUG Line {line_num}: Found C&E Loss = {hec_ras_data['CE_Loss']}")
-                        break
-            
-            # RIGHT COLUMN PARAMETERS - Use INDEPENDENT if statements
-            
-            # E.G. Elev (m)
-            if 'E.G. ELEV' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['EG_BR_US'] = float(all_numbers[-2])
-                    hec_ras_data['EG_BR_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found E.G. Elev US={hec_ras_data['EG_BR_US']}, DS={hec_ras_data['EG_BR_DS']}")
-            
-            # W.S. Elev (m)
-            if 'W.S. ELEV' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['WS_BR_US'] = float(all_numbers[-2])
-                    hec_ras_data['WS_BR_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found W.S. Elev US={hec_ras_data['WS_BR_US']}, DS={hec_ras_data['WS_BR_DS']}")
-            
-            # Crit W.S. (m)
-            if 'CRIT W.S.' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Crit_WS_US'] = float(all_numbers[-2])
-                    hec_ras_data['Crit_WS_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Crit W.S. US={hec_ras_data['Crit_WS_US']}, DS={hec_ras_data['Crit_WS_DS']}")
-            
-            # Max Chl Dpth (m)
-            if 'MAX CHL DPTH' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Max_Chl_Dpth_US'] = float(all_numbers[-2])
-                    hec_ras_data['Max_Chl_Dpth_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Max Chl Dpth US={hec_ras_data['Max_Chl_Dpth_US']}, DS={hec_ras_data['Max_Chl_Dpth_DS']}")
-            
-            # Vel Total (m/s)
-            if 'VEL TOTAL' in line_upper and '(M/S)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['velocity_avg'] = float(all_numbers[-2])
-                    hec_ras_data['Vel_BR_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Velocity US={hec_ras_data['velocity_avg']}, DS={hec_ras_data['Vel_BR_DS']}")
-            
-           # Flow Area (m2)
-            if 'FLOW AREA' in line_upper and '(M2)' in line_upper:
-                if len(all_numbers) >= 2:
-                    # Extract US and DS values
-                    # For lines like: "Flow Area (m2)	204.15 	143.80"
-                    # all_numbers[0] = 204.15 (US)
-                    # all_numbers[1] = 143.80 (DS)
-                    hec_ras_data['flow_area'] = float(all_numbers[0])
-                    hec_ras_data['Flow_Area_BR_DS'] = float(all_numbers[1])
-                    print(f"DEBUG Line {line_num}: Found Flow Area US={hec_ras_data['flow_area']}, DS={hec_ras_data['Flow_Area_BR_DS']}")
-            
-            # Froude # Chl
-            if 'FROUDE' in line_upper and 'CHL' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Froude_US'] = float(all_numbers[-2])
-                    hec_ras_data['Froude_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Froude US={hec_ras_data['Froude_US']}, DS={hec_ras_data['Froude_DS']}")
-            
-            # Specif Force (m3)
-            if 'SPECIF FORCE' in line_upper and '(M3)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Specif_Force_US'] = float(all_numbers[-2])
-                    hec_ras_data['Specif_Force_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Specific Force US={hec_ras_data['Specif_Force_US']}, DS={hec_ras_data['Specif_Force_DS']}")
-            
-            # Hydr Depth (m)
-            if 'HYDR DEPTH' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['hydraulic_depth'] = float(all_numbers[-2])
-                    hec_ras_data['Hydr_Dpth_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Hydr Depth US={hec_ras_data['hydraulic_depth']}, DS={hec_ras_data['Hydr_Dpth_DS']}")
-            
-            # W.P. Total (m)
-            if 'W.P. TOTAL' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['WP_Total_US'] = float(all_numbers[-2])
-                    hec_ras_data['WP_Total_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found W.P. Total US={hec_ras_data['WP_Total_US']}, DS={hec_ras_data['WP_Total_DS']}")
-            
-            # Conv. Total (m3/s)
-            if 'CONV. TOTAL' in line_upper and '(M3/S)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Conv_Total_US'] = float(all_numbers[-2])
-                    hec_ras_data['Conv_Total_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Conveyance US={hec_ras_data['Conv_Total_US']}, DS={hec_ras_data['Conv_Total_DS']}")
-            
-            # Shear Total (N/m2)
-            if 'SHEAR TOTAL' in line_upper and '(N/M2)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Shear_Total_US'] = float(all_numbers[-2])
-                    hec_ras_data['Shear_Total_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Shear US={hec_ras_data['Shear_Total_US']}, DS={hec_ras_data['Shear_Total_DS']}")
-            
-            # Power Total (N/m s)
-            if 'POWER TOTAL' in line_upper and '(N/M' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['Power_Total_US'] = float(all_numbers[-2])
-                    hec_ras_data['Power_Total_DS'] = float(all_numbers[-1])
-                    print(f"DEBUG Line {line_num}: Found Power US={hec_ras_data['Power_Total_US']}, DS={hec_ras_data['Power_Total_DS']}")
-            
-            # Top Width (m)
-            if 'TOP WIDTH' in line_upper and '(M)' in line_upper:
-                if len(all_numbers) >= 2:
-                    hec_ras_data['top_width'] = float(all_numbers[-2])
-                    print(f"DEBUG Line {line_num}: Found Top Width = {hec_ras_data['top_width']}")
-        
-        # Calculate discharge intensity
-        if hec_ras_data['Q_bridge'] and hec_ras_data['top_width']:
-            hec_ras_data['q_avg'] = hec_ras_data['Q_bridge'] / hec_ras_data['top_width']
-            hec_ras_data['q_max'] = hec_ras_data['q_avg'] * 1.4
-            print(f"DEBUG: Calculated q_avg = {hec_ras_data['q_avg']:.3f} m²/s")
-            print(f"DEBUG: Calculated q_max = {hec_ras_data['q_max']:.3f} m²/s")
-        
-        # Validate
-        if hec_ras_data['WSE'] and hec_ras_data['Q_bridge']:
-            print(f"DEBUG: ✅✅✅ TEXT FILE PARSING SUCCESSFUL! ✅✅✅")
-            print(f"DEBUG: Extracted {sum(1 for v in hec_ras_data.values() if v is not None)} parameters")
-            print(f"DEBUG: Key values:")
-            print(f"DEBUG:   WSE = {hec_ras_data['WSE']}")
-            print(f"DEBUG:   Q_bridge = {hec_ras_data['Q_bridge']}")
-            print(f"DEBUG:   Top Width = {hec_ras_data['top_width']}")
-            print(f"DEBUG:   Velocity US = {hec_ras_data['velocity_avg']}")
-            print(f"DEBUG:   Velocity DS = {hec_ras_data['Vel_BR_DS']}")
-            print(f"DEBUG:   Max Chl Dpth US = {hec_ras_data['Max_Chl_Dpth_US']}")
-            print(f"DEBUG:   Max Chl Dpth DS = {hec_ras_data['Max_Chl_Dpth_DS']}")
-            return hec_ras_data
-        else:
-            print(f"DEBUG: ❌❌❌ TEXT FILE PARSING FAILED ❌❌❌")
-            print(f"DEBUG: Missing required values:")
-            print(f"DEBUG:   WSE = {hec_ras_data['WSE']}")
-            print(f"DEBUG:   Q_bridge = {hec_ras_data['Q_bridge']}")
-            print(f"DEBUG:   Top Width = {hec_ras_data['top_width']}")
-            print(f"DEBUG: Total lines processed: {len(lines)}")
-            return None
-            
-    except Exception as e:
-        print(f"ERROR: Exception in parse_hec_ras_file: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
 
-
-def parse_hec_ras_directory(project_folder_path: str) -> Optional[Dict]:
-    """Read HEC-RAS project directory and extract data from output files"""
-    try:
-        project_path = Path(project_folder_path)
-        
-        if not project_path.exists():
-            print(f"ERROR: Path does not exist: {project_folder_path}")
-            return None
-        
-        out_files = list(project_path.glob('*.O*')) + list(project_path.glob('*.out')) + list(project_path.glob('*.txt'))
-        
-        if not out_files:
-            print(f"ERROR: No HEC-RAS output files found in {project_folder_path}")
-            return None
-        
-        print(f"DEBUG: Found output files: {[f.name for f in out_files]}")
-        
-        out_file = out_files[0]
-        
-        with open(out_file, 'rb') as f:
-            file_content = f.read()
-        
-        class MockFile:
-            def __init__(self, content, name):
-                self.content = content
-                self.name = name
-            def read(self):
-                return self.content
-        
-        mock_file = MockFile(file_content, out_file.name)
-        result = parse_hec_ras_file(mock_file)
-        
-        if result:
-            print(f"DEBUG: ✅ Directory parsing successful!")
-            return result
-        else:
-            print(f"DEBUG: ❌ Directory parsing failed")
-            return None
+            # Split by TAB
+            parts = line.split('\t')
             
-    except Exception as e:
-        print(f"ERROR: Exception in parse_hec_ras_directory: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+            # Debug first few lines
+            if i < 5:
+                print(f"DEBUG Line {i}: {line[:100]}")
+                print(f"DEBUG Parts count: {len(parts)}")
+                for j, part in enumerate(parts):
+                    print(f"  Part {j}: '{part.strip()}'")
 
-
-def parse_hec_ras_hdf_file(hdf_path: str) -> Optional[Dict]:
-    """Parse HEC-RAS HDF5 file using HECRASHDFParser class"""
-    try:
-        from src.hec_ras_hdf_parser import HECRASHDFParser
-        
-        print(f"DEBUG: Attempting HDF5 parsing: {hdf_path}")
-        
-        parser = HECRASHDFParser(hdf_path)
-        
-        if not parser.open():
-            print("DEBUG: Failed to open HDF5 file")
-            return None
-        
-        try:
-            result = parser.extract_all_data()
-            
-            if result and result.get('success'):
-                print(f"DEBUG: ✅ HDF5 parsing successful!")
-                print(f"DEBUG:   WSE = {result.get('WSE')}")
-                print(f"DEBUG:   Q_bridge = {result.get('Q_bridge')}")
-                print(f"DEBUG:   top_width = {result.get('top_width')}")
-                return result
-            else:
-                print("DEBUG: ❌ HDF5 parsing failed")
-                return None
+            # === LEFT COLUMN PARSING (parts[0] and parts[1]) ===
+            if len(parts) >= 2:
+                left_param = parts[0].strip()
+                left_value_str = parts[1].strip()
                 
-        except Exception as e:
-            print(f"DEBUG: Error during extraction: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-        finally:
-            parser.close()
-            
+                # Extract numeric value from left column
+                import re
+                left_numbers = re.findall(r"[-+]?\d*\.\d+|\d+", left_value_str)
+                left_value = float(left_numbers[0]) if left_numbers else None
+                
+                if left_value is not None:
+                    if 'E.G. US.' in left_param or 'EG US' in left_param:
+                        data['EG_US'] = left_value
+                        print(f"✅ LEFT: EG_US = {left_value}")
+                    elif 'W.S. US.' in left_param or 'WS US' in left_param:
+                        data['WSE'] = left_value
+                        print(f"✅ LEFT: WSE = {left_value}")
+                    elif 'Q Total' in left_param:
+                        data['Q_total'] = left_value
+                        print(f"✅ LEFT: Q_total = {left_value}")
+                    elif 'Q Bridge' in left_param:
+                        data['Q_bridge'] = left_value
+                        print(f"✅ LEFT: Q_bridge = {left_value}")
+                    elif 'Delta EG' in left_param:
+                        data['Delta_EG'] = left_value
+                        print(f"✅ LEFT: Delta_EG = {left_value}")
+                    elif 'Delta WS' in left_param:
+                        data['Delta_WS'] = left_value
+                        print(f"✅ LEFT: Delta_WS = {left_value}")
+                    elif 'Min El Weir' in left_param:
+                        data['Min_El_Weir'] = left_value
+                    elif 'Min El Prs' in left_param:
+                        data['Min_El_Prs'] = left_value
+                    elif 'BR Open Area' in left_param:
+                        data['BR_Open_Area'] = left_value
+                    elif 'BR Open Vel' in left_param:
+                        data['BR_Open_Vel'] = left_value
+
+            # === RIGHT COLUMN PARSING (parts[2], parts[3], parts[4]) ===
+            if len(parts) >= 4:
+                right_param = parts[2].strip()
+                right_us_str = parts[3].strip() if len(parts) > 3 else ''
+                right_ds_str = parts[4].strip() if len(parts) > 4 else ''
+                
+                # Extract numeric values from right column
+                import re
+                us_numbers = re.findall(r"[-+]?\d*\.\d+|\d+", right_us_str)
+                ds_numbers = re.findall(r"[-+]?\d*\.\d+|\d+", right_ds_str)
+                
+                us_value = float(us_numbers[0]) if us_numbers else None
+                ds_value = float(ds_numbers[0]) if ds_numbers else None
+                
+                # CRITICAL: Save with keys that report_generator.py expects!
+                if right_param and (us_value is not None or ds_value is not None):
+                    if 'E.G. Elev' in right_param:
+                        data['EG_BR_US'] = us_value
+                        data['EG_BR_DS'] = ds_value
+                        print(f"✅ RIGHT: EG_BR_US={us_value}, EG_BR_DS={ds_value}")
+                    elif 'W.S. Elev' in right_param:
+                        data['WS_BR_US'] = us_value
+                        data['WS_BR_DS'] = ds_value
+                        print(f"✅ RIGHT: WS_BR_US={us_value}, WS_BR_DS={ds_value}")
+                    elif 'Max Chl Dpth' in right_param:
+                        data['Max_Chl_Dpth_US'] = us_value
+                        data['Max_Chl_Dpth_DS'] = ds_value
+                        print(f"✅ RIGHT: Max_Chl_Dpth_US={us_value}, Max_Chl_Dpth_DS={ds_value}")
+                    elif 'Vel Total' in right_param:
+                        data['Vel_BR_US'] = us_value
+                        data['Vel_BR_DS'] = ds_value
+                        # ALSO save as velocity_avg for Section 4.2/5.2
+                        if us_value is not None:
+                            data['velocity_avg'] = us_value
+                        print(f"✅ RIGHT: Vel_BR_US={us_value}, Vel_BR_DS={ds_value}, velocity_avg={us_value}")
+                    elif 'Flow Area' in right_param:
+                        data['flow_area_us'] = us_value
+                        data['flow_area_ds'] = ds_value
+                        # ALSO save as flow_area for Section 4.2/5.2
+                        if us_value is not None:
+                            data['flow_area'] = us_value
+                        print(f"✅ RIGHT: flow_area_us={us_value}, flow_area_ds={ds_value}, flow_area={us_value}")
+                    elif 'Hydr Depth' in right_param:
+                        data['Hydr_Dpth_US'] = us_value
+                        data['Hydr_Dpth_DS'] = ds_value
+                        # ALSO save as hydraulic_depth for Section 4.2/5.2
+                        if us_value is not None:
+                            data['hydraulic_depth'] = us_value
+                        print(f"✅ RIGHT: Hydr_Dpth_US={us_value}, Hydr_Dpth_DS={ds_value}, hydraulic_depth={us_value}")
+                    elif 'Froude' in right_param:
+                        data['Froude_US'] = us_value
+                        data['Froude_DS'] = ds_value
+                        print(f"✅ RIGHT: Froude_US={us_value}, Froude_DS={ds_value}")
+                    elif 'W.P. Total' in right_param or 'Wetted Perimeter' in right_param:
+                        data['WP_Total_US'] = us_value
+                        data['WP_Total_DS'] = ds_value
+                    elif 'Conv. Total' in right_param or 'Conveyance' in right_param:
+                        data['Conv_Total_US'] = us_value
+                        data['Conv_Total_DS'] = ds_value
+                    elif 'Frctn Loss' in right_param or 'Friction Loss' in right_param:
+                        data['Frctn_Loss'] = us_value
+                        print(f"✅ RIGHT: Frctn_Loss={us_value}")
+                    elif 'C & E Loss' in right_param or 'CE Loss' in right_param:
+                        data['CE_Loss'] = us_value
+                        print(f"✅ RIGHT: CE_Loss={us_value}")
+                    elif 'Shear Total' in right_param:
+                        data['Shear_Total_US'] = us_value
+                        data['Shear_Total_DS'] = ds_value
+                    elif 'Power Total' in right_param:
+                        data['Power_Total_US'] = us_value
+                        data['Power_Total_DS'] = ds_value
+                    elif 'Top Width' in right_param:
+                        data['top_width_us'] = us_value
+                        data['top_width_ds'] = ds_value
+                        # ALSO save as top_width for Section 4.2/5.2
+                        if us_value is not None:
+                            data['top_width'] = us_value
+                        print(f"✅ RIGHT: top_width_us={us_value}, top_width_ds={ds_value}, top_width={us_value}")
+
+        # Calculate q_avg and q_max
+        if data.get('Q_bridge') and data.get('top_width') and data.get('top_width') > 0:
+            q_avg = data['Q_bridge'] / data['top_width']
+            data['q_avg'] = round(q_avg, 3)
+            data['q_max'] = round(q_avg * 1.4, 3)
+            print(f"✅ Calculated q_avg={data['q_avg']}, q_max={data['q_max']}")
+
+        print(f"\nDEBUG: === PARSED DATA SUMMARY ===")
+        print(f"DEBUG: Parsed data keys: {list(data.keys())}")
+        print(f"DEBUG: WSE={data.get('WSE')}, Q_bridge={data.get('Q_bridge')}")
+        print(f"DEBUG: flow_area={data.get('flow_area')}, flow_area_us={data.get('flow_area_us')}, flow_area_ds={data.get('flow_area_ds')}")
+        print(f"DEBUG: top_width={data.get('top_width')}, top_width_us={data.get('top_width_us')}")
+        print(f"DEBUG: velocity_avg={data.get('velocity_avg')}, Vel_BR_US={data.get('Vel_BR_US')}, Vel_BR_DS={data.get('Vel_BR_DS')}")
+        print(f"DEBUG: hydraulic_depth={data.get('hydraulic_depth')}, Hydr_Dpth_US={data.get('Hydr_Dpth_US')}, Hydr_Dpth_DS={data.get('Hydr_Dpth_DS')}")
+        print(f"DEBUG: Frctn_Loss={data.get('Frctn_Loss')}, CE_Loss={data.get('CE_Loss')}")
+        print(f"==============================\n")
+
+        return data
+
     except Exception as e:
-        print(f"ERROR: HDF5 parsing exception: {e}")
+        print(f"ERROR parsing HEC-RAS file: {e}")
+        import traceback
+        traceback.print_exc()
+        return {}
+
+
+def parse_hec_ras_hdf_file(file_path: str) -> Optional[Dict]:
+    """Parse HEC-RAS HDF5 output file"""
+    try:
+        import h5py
+        data = {}
+        
+        with h5py.File(file_path, 'r') as f:
+            if 'Geometry' in f:
+                geom = f['Geometry']
+                if 'River Rch' in geom:
+                    for river in geom['River Rch'].keys():
+                        data['river_name'] = river
+            
+            if 'Results' in f:
+                results = f['Results']
+                if 'Unsteady' in results:
+                    unsteady = results['Unsteady']
+                    if 'Output' in unsteady:
+                        output = unsteady['Output']
+                        if 'River Rch' in output:
+                            for river in output['River Rch'].keys():
+                                river_data = output['River Rch'][river]
+                                if 'Profile' in river_data:
+                                    for profile in river_data['Profile'].keys():
+                                        prof = river_data['Profile'][profile]
+                                        if 'WS' in prof:
+                                            data['WSE'] = float(prof['WS'][0])
+                                        if 'Q' in prof:
+                                            data['Q_total'] = float(prof['Q'][0])
+        
+        print(f"DEBUG: HDF5 parsed successfully, keys: {list(data.keys())}")
+        return data
+    
+    except Exception as e:
+        print(f"ERROR parsing HDF5 file: {e}")
         import traceback
         traceback.print_exc()
         return None
 
 
 def auto_parse_hec_ras(project_folder: str) -> Optional[Dict]:
-    """Auto-detect and parse HEC-RAS output using best available method"""
-    project_path = Path(project_folder)
+    """Auto-detect and parse HEC-RAS output from project folder"""
+    import os
+    from pathlib import Path
     
-    if not project_path.exists():
-        print(f"ERROR: Project folder not found: {project_folder}")
-        return None
+    folder = Path(project_folder)
     
-    print(f"DEBUG: Auto-detecting HEC-RAS output in {project_folder}")
+    print(f"DEBUG: Auto-parsing HEC-RAS from folder: {folder}")
     
-    txt_files = list(project_path.glob('*.O??')) + list(project_path.glob('*.out')) + list(project_path.glob('*.txt'))
-    
-    if txt_files:
-        print(f"DEBUG: Found text output: {txt_files[0].name}")
-        with open(txt_files[0], 'rb') as f:
-            file_content = f.read()
-        
-        class MockFile:
-            def __init__(self, content, name):
-                self.content = content
-                self.name = name
-            def read(self):
-                return self.content
-        
-        mock_file = MockFile(file_content, txt_files[0].name)
-        result = parse_hec_ras_file(mock_file)
-        if result:
-            return result
-    
-    hdf_files = list(project_path.glob('*.p??.hdf')) + list(project_path.glob('*.P??.HDF'))
-    
+    # Look for HDF5 file first
+    hdf_files = list(folder.glob('*.hdf'))
     if hdf_files:
-        print(f"DEBUG: Found HDF5 file: {hdf_files[0].name}")
-        result = parse_hec_ras_hdf_file(str(hdf_files[0]))
-        if result:
-            return result
+        print(f"DEBUG: Found HDF5 file: {hdf_files[0]}")
+        return parse_hec_ras_hdf_file(str(hdf_files[0]))
     
-    csv_files = list(project_path.glob('*.csv'))
+    # Look for text output files
+    txt_files = list(folder.glob('*.txt')) + list(folder.glob('*.O01'))
+    if txt_files:
+        print(f"DEBUG: Found text file: {txt_files[0]}")
+        with open(txt_files[0], 'r') as f:
+            return parse_hec_ras_file(f)
     
-    if csv_files:
-        print(f"DEBUG: Found CSV file: {csv_files[0].name}")
-        with open(csv_files[0], 'rb') as f:
-            file_content = f.read()
-        
-        class MockFile:
-            def __init__(self, content, name):
-                self.content = content
-                self.name = name
-            def read(self):
-                return self.content
-        
-        mock_file = MockFile(file_content, csv_files[0].name)
-        result = parse_hec_ras_file(mock_file)
-        if result:
-            return result
-    
-    print("ERROR: No HEC-RAS output files found")
+    print(f"DEBUG: No HEC-RAS files found in {folder}")
     return None

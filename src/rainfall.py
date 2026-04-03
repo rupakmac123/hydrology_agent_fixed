@@ -3,7 +3,6 @@ Rainfall Frequency Analysis Module
 Implements multiple distribution fitting methods for hydrological analysis
 Based on Department of Roads (DoR) Nepal Guidelines - Ratu Bridge Report
 """
-
 import pandas as pd
 import numpy as np
 from scipy import stats
@@ -37,14 +36,14 @@ class RainfallFrequencyAnalysis:
         self.idf_durations_hours = [0.25, 0.5, 1, 2, 6, 12, 24]
         self.idf_durations_labels = ['15 min', '30 min', '1 hr', '2 hr', '6 hr', '12 hr', '24 hr']
         self.idf_return_periods = [2, 5, 10, 50, 100, 200]
-    
+
     def fit_distributions(self) -> Dict:
         """Fit multiple distributions and return parameters"""
         results = {}
         
         try:
             gev_params = stats.genextreme.fit(self.data)
-            results['GEV'] = {'params': gev_params, 'distribution': stats.genextreme(*gev_params)}
+            results['GEV'] = {'params': gev_params, 'distribution': stats.genextreme(*gev_params)} 
         except Exception as e:
             print(f"GEV fit error: {e}")
         
@@ -74,7 +73,7 @@ class RainfallFrequencyAnalysis:
             print(f"Laplace fit error: {e}")
         
         return results
-    
+
     def goodness_of_fit_tests(self, distributions: Dict) -> Dict:
         """Perform Chi-Square, KS, and Anderson-Darling tests"""
         test_results = {}
@@ -122,11 +121,11 @@ class RainfallFrequencyAnalysis:
                     expected_freq = expected_freq * (np.sum(observed_freq) / np.sum(expected_freq))
                 
                 expected_freq = np.maximum(expected_freq, 0.1)
-                
+                 
                 if len(expected_freq) >= 2 and np.sum(observed_freq) > 0:
                     ddof = max(0, len(expected_freq) - 1 - 2)
                     chi2_stat, chi2_pvalue = stats.chisquare(f_obs=observed_freq, f_exp=expected_freq, ddof=ddof)
-                    
+                     
                     if chi2_pvalue is None or chi2_pvalue < 0 or chi2_pvalue > 1:
                         chi2_stat, chi2_pvalue = None, None
                         
@@ -163,7 +162,7 @@ class RainfallFrequencyAnalysis:
             }
         
         return test_results
-    
+
     def get_best_distribution(self, test_results: Dict) -> str:
         """
         Recommend best fitting distribution based on test results
@@ -193,7 +192,7 @@ class RainfallFrequencyAnalysis:
         print(f"  KS p-value: {best_pvalue:.4f} (higher = better fit)")
         
         return best_dist
-    
+
     def calculate_return_period_rainfall(self, distribution: dict, return_periods: List[int]) -> Dict:
         """Calculate rainfall depth for different return periods"""
         dist = distribution['distribution']
@@ -214,7 +213,7 @@ class RainfallFrequencyAnalysis:
                 results[f'{T}_year'] = 0.0
         
         return results
-    
+
     def calculate_rainfall_depth(self, distribution: dict, duration_hr: float, return_period: int) -> float:
         """Calculate rainfall depth for given duration and return period"""
         try:
@@ -239,13 +238,13 @@ class RainfallFrequencyAnalysis:
         except Exception as e:
             print(f"Error calculating depth: {e}")
             return 0.0
-    
+
     def calculate_intensity(self, depth_mm: float, duration_hr: float) -> float:
         """Calculate rainfall intensity (mm/hr)"""
         if duration_hr <= 0:
             return 0.0
         return depth_mm / duration_hr
-    
+
     def generate_idf_data(self, distribution: dict) -> pd.DataFrame:
         """Generate complete IDF data table"""
         data = []
@@ -264,7 +263,7 @@ class RainfallFrequencyAnalysis:
                 })
         
         return pd.DataFrame(data)
-    
+
     def plot_idf_curves(self, distribution_name: str, idf_data: pd.DataFrame, figsize=(10, 6)) -> plt.Figure:
         """Generate IDF curve plot"""
         print(f"DEBUG PLOT: Starting plot generation...")
@@ -288,7 +287,7 @@ class RainfallFrequencyAnalysis:
             if not rp_data.empty:
                 durations = rp_data['Duration_Label'].values
                 intensities = rp_data['Intensity_mm_hr'].values
-                
+                 
                 print(f"DEBUG PLOT: RP {rp}-year: {len(durations)} points")
                 
                 ax.plot(durations, intensities, marker='o', linewidth=2, markersize=6,
@@ -314,7 +313,7 @@ class RainfallFrequencyAnalysis:
         print(f"DEBUG PLOT: Figure size: {fig.get_size_inches()}")
         
         return fig
-    
+
     def get_idf_table(self, idf_data: pd.DataFrame) -> pd.DataFrame:
         """Get IDF data as formatted table for report"""
         intensity_table = idf_data.pivot_table(
@@ -323,9 +322,9 @@ class RainfallFrequencyAnalysis:
             columns='Return_Period',
             aggfunc='first'
         )
-        
+         
         return intensity_table.round(2)
-    
+
     def full_analysis(self, return_periods: List[int] = None) -> Dict:
         """Complete rainfall frequency analysis workflow"""
         if return_periods is None:
@@ -340,9 +339,11 @@ class RainfallFrequencyAnalysis:
                     'R100yr': 519.38,
                     'rainfall_estimates': {},
                     'idf_plot_path': None,
-                    'idf_table': {},
-                    'idf_data': {},
-                    'rainfall_data': []
+                    'idf_table': [],
+                    'idf_data': [],
+                    'rainfall_data': [],
+                    'gof_results': [],  # CRITICAL: Add gof_results key
+                    'test_results': []
                 }
             
             test_results = self.goodness_of_fit_tests(distributions)
@@ -350,6 +351,7 @@ class RainfallFrequencyAnalysis:
             best_dist = distributions[best_dist_name]
             rainfall_estimates = self.calculate_return_period_rainfall(best_dist, return_periods)
             
+            # CRITICAL FIX: Create rainfall_data as list of tuples (year, rainfall)
             rainfall_data = []
             for i in range(len(self.data)):
                 rainfall_data.append({
@@ -358,9 +360,9 @@ class RainfallFrequencyAnalysis:
                 })
             
             idf_plot_path = None
-            idf_table = {}
-            idf_data = {}
-            
+            idf_table = []  # CRITICAL: Initialize as empty list
+            idf_data = []   # CRITICAL: Initialize as empty list
+             
             try:
                 print(f"DEBUG: Starting IDF generation...")
                 
@@ -378,7 +380,7 @@ class RainfallFrequencyAnalysis:
                 try:
                     idf_fig = self.plot_idf_curves(best_dist_name, idf_data_df)
                     
-                    idf_plot_path_png = str(idf_plot_path)
+                    idf_plot_path_png = str(idf_plot_path) 
                     idf_fig.savefig(idf_plot_path_png, dpi=150, bbox_inches='tight', facecolor='white')
                     
                     idf_plot_path_jpg = str(idf_plot_path).replace('.png', '.jpg')
@@ -405,38 +407,70 @@ class RainfallFrequencyAnalysis:
                     traceback.print_exc()
                     idf_plot_path = None
                 
-                idf_table = idf_table_df.to_dict()
-                idf_data = idf_data_df.to_dict()
+                # CRITICAL FIX: Convert to list of dicts for report_generator compatibility
+                idf_table = idf_table_df.reset_index().to_dict('records')
+                idf_data = idf_data_df.to_dict('records')  # List of dicts, NOT dict of lists
                 
                 print(f"IDF curves generated successfully!")
+                print(f"DEBUG: idf_table type: {type(idf_table)}, length: {len(idf_table)}")
+                print(f"DEBUG: idf_data type: {type(idf_data)}, length: {len(idf_data)}")
                 
             except Exception as e:
                 print(f"IDF generation error: {e}")
                 import traceback
                 traceback.print_exc()
                 idf_plot_path = None
-                idf_table = {}
-                idf_data = {}
+                idf_table = []
+                idf_data = []
+            
+            # CRITICAL FIX: Return BOTH 'test_results' AND 'gof_results' keys
+            # Convert test_results to list format for report_generator
+            gof_results_list = []
+            for dist_name, results in test_results.items():
+                gof_results_list.append((
+                    dist_name,
+                    results.get('KS_statistic', 0),
+                    results.get('KS_pvalue', 0),
+                    results.get('Chi2_statistic', 0) or 0,
+                    results.get('score', 0)
+                ))
             
             return {
                 'best_distribution': best_dist_name,
-                'test_results': test_results,
+                'test_results': test_results,  # Keep original dict format
+                'gof_results': gof_results_list,  # CRITICAL: Add list format for report
                 'rainfall_estimates': rainfall_estimates,
+                'R2yr': rainfall_estimates.get('2_year', 127.87),
+                'R5yr': rainfall_estimates.get('5_year', 180.82),
+                'R10yr': rainfall_estimates.get('10_year', 227.47),
+                'R20yr': rainfall_estimates.get('20_year', 283.50),
+                'R50yr': rainfall_estimates.get('50_year', 377.00),
                 'R100yr': rainfall_estimates.get('100_year', 519.38),
+                'R200yr': rainfall_estimates.get('200_year', 577.54),
                 'idf_plot_path': str(idf_plot_path) if idf_plot_path else None,
-                'idf_table': idf_table,
-                'idf_data': idf_data,
-                'rainfall_data': rainfall_data
+                'idf_table': idf_table,  # List of dicts
+                'idf_data': idf_data,    # List of dicts
+                'rainfall_data': rainfall_data  # List of dicts
             }
             
         except Exception as e:
             print(f"Rainfall analysis error: {e}")
+            import traceback
+            traceback.print_exc()
             return {
                 'best_distribution': 'Laplace (Report Default)',
                 'R100yr': 519.38,
+                'R2yr': 127.87,
+                'R5yr': 180.82,
+                'R10yr': 227.47,
+                'R20yr': 283.50,
+                'R50yr': 377.00,
+                'R200yr': 577.54,
                 'rainfall_estimates': {},
                 'idf_plot_path': None,
-                'idf_table': {},
-                'idf_data': {},
-                'rainfall_data': []
+                'idf_table': [],
+                'idf_data': [],
+                'rainfall_data': [],
+                'gof_results': [],
+                'test_results': {}
             }
